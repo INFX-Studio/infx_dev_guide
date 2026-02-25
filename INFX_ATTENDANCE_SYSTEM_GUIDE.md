@@ -1,0 +1,68 @@
+# 출퇴근 SaaS 시스템 설계 문서
+
+## 1. 개요
+
+### 1.1 목적
+- 프로젝트 타임로그 웹서비스에 출퇴근 기능 추가
+- 출근/퇴근 시간 기록 및 근무시간 자동 계산
+- 정정 요청 및 승인 워크플로우 지원
+
+### 1.2 주요 기능
+- 출근/퇴근 버튼으로 시간 기록
+- 일별/월별 근무시간 계산 (야근 포함)
+- 정정 요청 → 팀장 승인/반려 워크플로우
+- 모든 이력 보존 (원본 기록 유지)
+- 데이터 무결성 검증 시스템
+
+---
+
+## 2. DB 설계
+
+### 2.1 설계 방식
+- **이벤트 로그 방식** 채택
+- 엔티티 1개로 모든 기록 관리
+- 정정 시 새 레코드 생성, 원본은 무효화 (삭제 안 함)
+- `sg_is_valid` 필드로 현재 유효한 기록 구분
+
+### 2.2 엔티티 정보
+
+| 항목 | 값 |
+|------|-----|
+| Entity Type | CustomNonProjectEntity10 |
+| Display Name | 출퇴근 기록 |
+
+### 2.3 필드 정의
+
+| 필드명 | Display Name | 타입 | 필수 | 설명 |
+|--------|--------------|------|------|------|
+| `code` | Code | text | O | `{이름}_{YYYYMMDD}_{구분}_{HHMMSS}` |
+| `sg_user` | 직원 | entity(HumanUser) | O | 대상 직원 |
+| `sg_date` | 근무일 | date | O | 출퇴근 날짜 |
+| `sg_event_type` | 구분 | list | O | `출근`, `퇴근` |
+| `sg_timestamp` | 시간 | date_time | O | 실제 출퇴근 시간 |
+| `sg_is_valid` | 유효여부 | checkbox | O | 현재 유효한 기록 여부 (기본값: true) |
+| `sg_previous_log` | 이전기록 | entity(Self) | - | 정정 시 대체된 이전 로그 |
+| `sg_status` | 상태 | list | O | `정상`, `대기`, `승인`, `반려` |
+| `sg_reason` | 정정사유 | text | - | 정정 요청 사유 |
+| `sg_requested_at` | 요청시간 | date_time | - | 정정 요청 시간 |
+| `sg_approved_by` | 승인자 | entity(HumanUser) | - | 승인한 팀장 |
+| `sg_approved_at` | 승인시간 | date_time | - | 승인 시간 |
+| `sg_reject_reason` | 반려사유 | text | - | 반려 사유 |
+
+### 2.4 List 필드 값
+
+#### sg_event_type
+| Code | Display Name |
+|------|--------------|
+| `출근` | 출근 |
+| `퇴근` | 퇴근 |
+
+#### sg_status
+| Code | Display Name |
+|------|--------------|
+| `정상` | 정상 |
+| `대기` | 대기 |
+| `승인` | 승인 |
+| `반려` | 반려 |
+
+### 2.5 Code 예시
