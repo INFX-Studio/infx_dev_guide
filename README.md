@@ -69,7 +69,7 @@ inFX 스타일에 맞는 코드를 생성한다.
 | [`INFX_BOOKSTACK_STYLE_GUIDE.md`](INFX_BOOKSTACK_STYLE_GUIDE.md) | 사내 위키(BookStack) 문서 작성 규칙 |
 | [`APP_UPDATE_GUIDE.md`](APP_UPDATE_GUIDE.md) | 앱 업데이트 화면 구현 기술 및 삽질 기록 |
 | [`CODE_SNIPPETS.md`](CODE_SNIPPETS.md) | 바로 사용 가능한 코드 조각 모음 |
-| [`FAQ.md`](FAQ.md) | 개발 중 자주 나오는 질문과 답변 |
+| [`INFX_DEV_FAQ.md`](INFX_DEV_FAQ.md) | 개발 중 자주 나오는 질문과 답변 |
 
 ---
 
