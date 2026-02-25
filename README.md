@@ -41,7 +41,7 @@ inFX 스타일에 맞는 코드를 생성한다.
 
 | 파일 | 설명 |
 |------|------|
-| [`INFX_PYTHON_CODING_STYLE_GUIDE.md`](INFX_PYTHON_CODING_STYLE_GUIDE.md) | Python 코딩 스타일 규칙 및 패턴 |
+| [`INFX_PYTHON_CODING_GUIDE.md`](INFX_PYTHON_CODING_GUIDE.md) | Python 코딩 스타일 규칙 및 패턴 |
 | [`INFX_PYSIDE2_STYLE_GUIDE.md`](INFX_PYSIDE2_STYLE_GUIDE.md) | PySide2 GUI 코드 작성 규칙 |
 
 ### 🏗️ 인프라 & 환경
@@ -84,7 +84,7 @@ AI 에이전트가 코드를 작성할 때 이 저장소의 규칙을 자동으�
 코드를 작성하기 전에 아래 가이드 파일을 반드시 읽고 규칙을 따를 것.
 
 ### 항상 참조할 가이드
-- 코딩 스타일: C:/dev/infx/infx_dev_guide/INFX_PYTHON_CODING_STYLE_GUIDE.md
+- 코딩 스타일: C:/dev/infx/infx_dev_guide/INFX_PYTHON_CODING_GUIDE.md
 - 인프라/경로:   C:/dev/infx/infx_dev_guide/INFX_INFRA_GUIDE.md
 
 ### 작업별 참조 가이드
@@ -98,7 +98,7 @@ AI 에이전트가 코드를 작성할 때 이 저장소의 규칙을 자동으�
 
 | 작업 내용 | 참조할 가이드 |
 |-----------|--------------|
-| 일반 Python 코드 작성 | `INFX_PYTHON_CODING_STYLE_GUIDE.md` |
+| 일반 Python 코드 작성 | `INFX_PYTHON_CODING_GUIDE.md` |
 | PySide2 GUI 개발 | `INFX_PYSIDE2_STYLE_GUIDE.md` |
 | ShotGrid API 연동 | `INFX_SHOTGRID_GUIDE.md` |
 | Deadline 플러그인 개발 | `INFX_DEADLINE_PLUGIN_GUIDE.md` |
@@ -114,7 +114,7 @@ AI 에이전트가 코드를 작성할 때 이 저장소의 규칙을 자동으�
 ### 온보딩 순서 (신입 개발자)
 
 1. [`INFX_INFRA_GUIDE.md`](INFX_INFRA_GUIDE.md) — 개발 환경 및 경로 구조 파악
-2. [`INFX_PYTHON_CODING_STYLE_GUIDE.md`](INFX_PYTHON_CODING_STYLE_GUIDE.md) — 코딩 규칙 숙지
+2. [`INFX_PYTHON_CODING_GUIDE.md`](INFX_PYTHON_CODING_GUIDE.md) — 코딩 규칙 숙지
 3. 담당 모듈에 맞는 가이드 추가 학습
 
 > 💡 **팁**: 에디터에서 이 저장소를 열어두고 작업하면 가이드를 빠르게 전환할 수 있다.
