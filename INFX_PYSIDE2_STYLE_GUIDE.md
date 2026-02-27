@@ -248,32 +248,94 @@ class UserTaskSelector(QWidget):
 
 ---
 
-## DPI 스케일링 패턴
+## DPI 스케일링
 
-고해상도 디스플레이를 지원하기 위해 `_dpi()` 메서드를 사용한다.
+### 기본 원칙
+
+DPI 스케일링은 Qt의 `AA_EnableHighDpiScaling`에 맡기고, 수동 DPI 계산은 하지 않는다.
+
+- non-DCC 앱(My Flova 등): `QApplication` 생성 전에 `AA_EnableHighDpiScaling`을 활성화한다.
+- DCC 앱(Maya, Nuke 등): DCC가 이미 `QApplication`을 생성하므로 별도 설정 불가. Windows 비트맵 스케일링이 알아서 처리한다.
+- 두 환경 모두 `setFixedHeight(N)` 코드가 동일하게 동작한다.
+
+### non-DCC 앱 진입점 설정
+
+`QApplication` 생성 전에 반드시 아래 두 줄을 추가한다.
 
 ```python
-class _FlovaDpiMixin:
+from PySide2.QtWidgets import QApplication
+from PySide2.QtCore import Qt
 
-    def _dpi(self, size):
-        """주어진 크기를 화면의 DPI에 맞게 스케일링한다."""
-        dpi = QApplication.primaryScreen().physicalDotsPerInch()
-        scale = dpi / 96.0
-        return int(size * scale)
+# 반드시 QApplication 생성 전에 호출
+QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+
+app = QApplication(sys.argv)
+```
+
+⚠️ **주의**: `setAttribute`는 `QApplication(sys.argv)` 호출 이전에 실행해야 한다. 이후에 호출하면 아무 효과 없다.
+
+### 위젯 높이 통일
+
+QLabel, QComboBox, QPushButton 등의 높이가 위젯마다 달라서 수평 배치 시 삐뚤빼뚤해지는 문제를 방지한다.
+`setFixedHeight`로 높이를 통일하되, 값은 논리 픽셀(logical pixel)로 지정한다.
+
+- `AA_EnableHighDpiScaling` 활성화 시: Qt가 논리 픽셀을 물리 픽셀로 자동 변환한다.
+- DCC 환경: 물리 픽셀 고정이지만, Windows 비트맵 스케일링이 처리한다.
+
+```python
+WIDGET_HEIGHT = 25  # 논리 픽셀 기준
 
 
-class MyWidget(_FlovaDpiMixin, QWidget):
+class MyWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent=parent)
 
-        # DPI에 맞게 크기 조절
-        self.setMinimumWidth(self._dpi(400))
-        self.setMinimumHeight(self._dpi(300))
+        self.label = QLabel('이름')
+        self.label.setFixedHeight(WIDGET_HEIGHT)
 
-        # 아이콘 크기도 DPI 스케일링
-        icon_size = self._dpi(24)
-        self.button.setIconSize(QSize(icon_size, icon_size))
+        self.combo = QComboBox()
+        self.combo.setFixedHeight(WIDGET_HEIGHT)
+
+        self.button = QPushButton('확인')
+        self.button.setFixedHeight(WIDGET_HEIGHT)
+```
+
+### QSS에서 크기 단위
+
+스타일시트의 크기 단위는 반드시 `px`만 사용한다. `pt` 단위는 사용하지 않는다.
+
+```python
+# 올바른 사용 (O)
+STYLE = '''
+    QLabel {
+        font-size: 12px;
+        padding: 4px 8px;
+    }
+'''
+
+# 잘못된 사용 (X) - pt는 DPI에 따라 크기가 달라진다
+STYLE = '''
+    QLabel {
+        font-size: 9pt;
+    }
+'''
+```
+
+### 수동 DPI 계산 금지
+
+`physicalDotsPerInch()`, `devicePixelRatio()` 등을 직접 읽어서 크기를 계산하지 않는다.
+`AA_EnableHighDpiScaling`이 활성화되면 Qt가 자동으로 처리하므로 수동 계산은 이중 스케일링을 유발한다.
+
+```python
+# 잘못된 사용 (X) - 이중 스케일링 발생
+dpi = QApplication.primaryScreen().physicalDotsPerInch()
+scale = dpi / 96.0
+self.setFixedHeight(int(25 * scale))
+
+# 올바른 사용 (O) - Qt에 맡긴다
+self.setFixedHeight(25)
 ```
 
 ---
