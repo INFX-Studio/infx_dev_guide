@@ -962,3 +962,106 @@ class InfxUser:
         from flova.shotgrid.cache import SGUserCache
         return SGUserCache().get_data()
 ```
+
+---
+
+## 코드 검증 (LSP 기반)
+
+코드를 작성하거나 수정한 후에는 **LSP(Language Server Protocol) 기반 정적 분석 검증을 반드시 수행해야 한다.**
+검증을 생략하면 타입 오류, 미정의 변수, 잘못된 참조 등이 런타임에서야 발견된다.
+
+---
+
+### 필수 설치 도구
+
+검증 도구는 **시스템 인터프리터(System Python)**에 설치한다.
+가상환경(venv)이 아닌 시스템 Python에 설치해야 에디터와 AI 에이전트(Claude Code 등)가 LSP 서버를 올바르게 인식한다.
+
+```bash
+# 타입 검사기 (필수)
+pip install pyright
+
+# 린터 + 포매터 (필수)
+pip install ruff
+
+# Python LSP 서버 (에디터 연동 시 선택)
+pip install python-lsp-server
+```
+
+> ⚠️ **주의**: 시스템 Python이 여러 개(2.x, 3.x)라면 `python3 -m pip install pyright` 형태로 명시적으로 지정한다.
+
+---
+
+### Pyright — 타입 검사
+
+Pyright는 Microsoft가 만든 Python 정적 타입 검사기이다.
+LSP 서버로도 동작하며, 에디터에서 실시간으로 타입 오류를 확인할 수 있다.
+
+```bash
+# 단일 파일 검사
+pyright flova/app/flova_task/main_window.py
+
+# 디렉토리 전체 검사
+pyright flova/
+
+# 현재 디렉토리 검사
+pyright .
+```
+
+검사 후 오류가 없어야 코드가 완성된 것으로 간주한다.
+
+---
+
+### Ruff — 린터 + 포매터
+
+Ruff는 Rust 기반의 고속 Python 린터로, PEP-8 검사와 자동 수정을 지원한다.
+
+```bash
+# 린트 검사
+ruff check flova/app/flova_task/main_window.py
+
+# 자동 수정 가능한 항목 수정
+ruff check --fix flova/
+
+# 포맷 확인
+ruff format --check flova/
+```
+
+---
+
+### 검증 작업 원칙
+
+- 코드 수정 후 **반드시** `pyright`로 타입 오류를 검사한다.
+- 커밋 전에 `ruff check` 린트 오류가 없어야 한다.
+- AI 에이전트(Claude Code 등)도 코드 작성·수정 후 LSP 검증을 수행해야 한다.
+- `# type: ignore`, `# noqa` 주석으로 오류를 억제하지 않는다. 근본 원인을 수정한다.
+
+```python
+# 타입 억제 주석 사용 금지 (X)
+result = some_function()  # type: ignore
+from flova import something  # noqa: E501
+
+# 근본 원인을 수정한다 (O)
+result: Optional[str] = some_function()
+```
+
+---
+
+### 에디터 설정 (VS Code 기준)
+
+VS Code에서 Pyright를 LSP로 사용하려면 **Pylance** 확장을 설치한다.
+Pylance는 Pyright 기반으로 동작한다.
+
+```json
+// .vscode/settings.json
+{
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.pythonPath": "C:/Python39/python.exe",
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    }
+}
+```
+
+> 💡 **팁**: `typeCheckingMode`는 `off` / `basic` / `standard` / `strict` 단계가 있다.
+> 레거시 코드베이스에서는 `basic`부터 시작하여 점진적으로 올리는 것을 권장한다.
