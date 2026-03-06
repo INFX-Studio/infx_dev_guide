@@ -45,7 +45,7 @@
 | `sg_type` | 구분 | list | O | `출근`, `퇴근` |
 | `sg_status` | 상태 | list | - | (null), `요청`, `승인`, `반려` |
 | `sg_time` | 시간 | date_time | - | 출퇴근 시간 또는 정정 희망 시간 |
-| `sg_related_attendance` | 관련출퇴근 | entity(Self) | - | 연결 대상 레코드 |
+| `sg_parent` | Parent | entity(Self) | - | 연결 대상 레코드 |
 | `sg_reason` | 사유 | text | - | 정정 사유 또는 반려 사유 |
 
 ### 2.4 sg_time 필드 용도
@@ -90,7 +90,7 @@
 
 ### 2.8 레코드 종류 (sg_type + sg_status 조합)
 
-| sg_status | sg_type | 의미 | sg_related_attendance |
+| sg_status | sg_type | 의미 | sg_parent |
 |-----------|---------|------|----------------------|
 | null | 출근 | 확정된 출근 | - 또는 이전 출근 레코드 |
 | null | 퇴근 | 확정된 퇴근 | - 또는 이전 퇴근 레코드 |
@@ -137,18 +137,18 @@ A0: 출근 (09:30)
  └─ R1: 출근 정정 요청 (08:00으로 변경 요청)
      │  - sg_status = 요청
      │  - sg_time = 08:00
-     │  - sg_related_attendance = A0
+     │  - sg_parent = A0
      │  - sg_reason = "지하철 지연으로 늦게 기록됨"
      │
      └─ D1: 출근 정정 승인
          │  - sg_status = 승인
-         │  - sg_related_attendance = R1
+         │  - sg_parent = R1
          │  - sg_user = 팀장
          │
          └─ A1: 출근 (08:00) — 새 확정 레코드
               - sg_status = null
               - sg_time = 08:00
-              - sg_related_attendance = A0
+              - sg_parent = A0
 ```
 
 ### 3.3 정정 요청 → 반려 → 재요청 → 승인
@@ -158,31 +158,31 @@ A0: 출근 (09:30)
  │
  ├─ R1: 출근 정정 요청 (08:00)
  │   │  - sg_time = 08:00
- │   │  - sg_related_attendance = A0
+ │   │  - sg_parent = A0
  │   │
  │   └─ D1: 출근 정정 반려
  │        - sg_status = 반려
- │        - sg_related_attendance = R1
+ │        - sg_parent = R1
  │        - sg_reason = "증빙 부족"
  │
  └─ R2: 출근 정정 요청 (08:30) — 재요청
      │  - sg_time = 08:30
-     │  - sg_related_attendance = A0
+     │  - sg_parent = A0
      │  - sg_reason = "증빙 첨부함"
      │
      └─ D2: 출근 정정 승인
-         │  - sg_related_attendance = R2
+         │  - sg_parent = R2
          │
          └─ A1: 출근 (08:30) — 새 확정 레코드
               - sg_time = 08:30
-              - sg_related_attendance = A0
+              - sg_parent = A0
 ```
 
 ### 3.4 현재 상태 판단 로직
 
 특정 출퇴근(A0)의 현재 상태를 확인하려면:
 
-1. A0를 `sg_related_attendance`로 참조하는 레코드들 조회
+1. A0를 `sg_parent`로 참조하는 레코드들 조회
 2. 가장 최근(`created_at` 기준) 레코드의 `sg_status` 확인
 
 ```python
@@ -191,7 +191,7 @@ def get_attendance_status(original_attendance):
     # 관련 레코드 조회 (최신순)
     related = sg.find(
         'CustomNonProjectEntity10',
-        [['sg_related_attendance', 'is', original_attendance]],
+        [['sg_parent', 'is', original_attendance]],
         ['sg_status', 'sg_type', 'created_at'],
         order=[{'field_name': 'created_at', 'direction': 'desc'}]
     )
@@ -272,8 +272,8 @@ def get_attendance_status(original_attendance):
 
 1. **하루 1개의 확정 출근**: 같은 `sg_user + sg_date`에 `sg_type=출근, sg_status=null`은 최대 1개
 2. **하루 1개의 확정 퇴근**: 같은 `sg_user + sg_date`에 `sg_type=퇴근, sg_status=null`은 최대 1개
-3. **요청 대상 존재**: `sg_status=요청`인 레코드는 `sg_related_attendance`가 반드시 존재
-4. **승인/반려 대상 존재**: `sg_status=승인/반려`인 레코드는 `sg_related_attendance`가 요청 레코드를 가리켜야 함
+3. **요청 대상 존재**: `sg_status=요청`인 레코드는 `sg_parent`가 반드시 존재
+4. **승인/반려 대상 존재**: `sg_status=승인/반려`인 레코드는 `sg_parent`가 요청 레코드를 가리켜야 함
 
 ### 5.2 검증 쿼리 예시
 
