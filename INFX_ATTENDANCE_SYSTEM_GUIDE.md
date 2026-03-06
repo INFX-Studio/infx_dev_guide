@@ -43,7 +43,7 @@
 | `sg_user` | 사용자 | entity(HumanUser) | O | 레코드 종류별 의미 다름 (아래 표 참고) |
 | `sg_date` | 근무일 | date | O | 출퇴근 날짜 |
 | `sg_type` | 구분 | list | O | `출근`, `퇴근` |
-| `sg_status` | 상태 | list | - | (null), `요청`, `승인`, `반려` |
+| `sg_status` | 상태 | list | - | `정상`, `정정요청`, `승인`, `반려` |
 | `sg_time` | 시간 | date_time | - | 출퇴근 시간 또는 정정 희망 시간 |
 | `sg_parent` | Parent | entity(Self) | - | 연결 대상 레코드 |
 | `sg_reason` | 사유 | text | - | 정정 사유 또는 반려 사유 |
@@ -52,8 +52,8 @@
 
 | 레코드 종류 | sg_time 의미 |
 |---------------|----------------|
-| 확정 (sg_status=null) | 실제 출퇴근 시간 |
-| 요청 (sg_status='요청') | 정정 희망 시간 |
+| 정상 (sg_status='정상') | 실제 출퇴근 시간 |
+| 정정요청 (sg_status='정정요청') | 정정 희망 시간 |
 | 승인/반려 | null (의미 없음) |
 
 ### 2.5 sg_user 필드 용도
@@ -83,8 +83,8 @@
 
 | Code | Display Name | 설명 |
 |------|--------------|------|
-| (null) | - | 확정된 출퇴근 기록 |
-| `요청` | 요청 | 정정 요청 |
+| `정상` | 정상 | 확정된 출퇴근 기록 |
+| `정정요청` | 정정요청 | 정정 요청 |
 | `승인` | 승인 | 정정 승인 |
 | `반려` | 반려 | 정정 반려 |
 
@@ -92,10 +92,10 @@
 
 | sg_status | sg_type | 의미 | sg_parent |
 |-----------|---------|------|----------------------|
-| null | 출근 | 확정된 출근 | - 또는 이전 출근 레코드 |
-| null | 퇴근 | 확정된 퇴근 | - 또는 이전 퇴근 레코드 |
-| 요청 | 출근 | 출근 정정 요청 | 원본 출근 레코드 |
-| 요청 | 퇴근 | 퇴근 정정 요청 | 원본 퇴근 레코드 |
+| 정상 | 출근 | 확정된 출근 | - 또는 이전 출근 레코드 |
+| 정상 | 퇴근 | 확정된 퇴근 | - 또는 이전 퇴근 레코드 |
+| 정정요청 | 출근 | 출근 정정 요청 | 원본 출근 레코드 |
+| 정정요청 | 퇴근 | 퇴근 정정 요청 | 원본 퇴근 레코드 |
 | 승인 | 출근 | 출근 정정 승인 | 승인한 요청 레코드 |
 | 승인 | 퇴근 | 퇴근 정정 승인 | 승인한 요청 레코드 |
 | 반려 | 출근 | 출근 정정 반려 | 반려한 요청 레코드 |
@@ -108,8 +108,8 @@
 ```
 
 예시:
-- `홍길동_20260305_출근_140530` — 확정된 출근
-- `홍길동_20260305_출근_요청_163000` — 출근 정정 요청
+- `홍길동_20260305_출근_정상_140530` — 확정된 출근
+- `홍길동_20260305_출근_정정요청_163000` — 출근 정정 요청
 - `홍길동_20260305_출근_승인_170000` — 출근 정정 승인
 - `홍길동_20260305_출근_반려_170500` — 출근 정정 반려
 
@@ -121,11 +121,11 @@
 
 ```
 [출근 버튼 클릭]
-└─ 레코드 생성: sg_type=출근, sg_status=null
+└─ 레코드 생성: sg_type=출근, sg_status=정상
    - sg_time = 출근 시간
 
 [퇴근 버튼 클릭]
-└─ 레코드 생성: sg_type=퇴근, sg_status=null
+└─ 레코드 생성: sg_type=퇴근, sg_status=정상
    - sg_time = 퇴근 시간
 ```
 
@@ -135,7 +135,7 @@
 A0: 출근 (09:30)
  │
  └─ R1: 출근 정정 요청 (08:00으로 변경 요청)
-     │  - sg_status = 요청
+     │  - sg_status = 정정요청
      │  - sg_time = 08:00
      │  - sg_parent = A0
      │  - sg_reason = "지하철 지연으로 늦게 기록됨"
@@ -146,7 +146,7 @@ A0: 출근 (09:30)
          │  - sg_user = 팀장
          │
          └─ A1: 출근 (08:00) — 새 확정 레코드
-              - sg_status = null
+              - sg_status = 정상
               - sg_time = 08:00
               - sg_parent = A0
 ```
@@ -202,9 +202,9 @@ def get_attendance_status(original_attendance):
     latest = related[0]
     status = latest.get('sg_status')
     
-    if status is None:
+    if status == '정상':
         return '확정'  # 새 확정 레코드가 생성됨 (승인 완료)
-    elif status == '요청':
+    elif status == '정정요청':
         return '대기'  # 승인 대기 중
     elif status == '승인':
         return '승인됨'  # 승인 처리됨 (새 확정 레코드 생성 대기)
@@ -249,7 +249,7 @@ def get_attendance_status(original_attendance):
 
 - 출퇴근 시간 클릭 시 정정 요청 다이얼로그 표시
 - 희망 시간과 정정 사유 입력 필수
-- 요청 레코드 생성 (`sg_status = '요청'`)
+- 요청 레코드 생성 (`sg_status = '정정요청'`)
 
 ### 4.3 승인/반려
 
@@ -270,9 +270,9 @@ def get_attendance_status(original_attendance):
 
 ### 5.1 필수 검증
 
-1. **하루 1개의 확정 출근**: 같은 `sg_user + sg_date`에 `sg_type=출근, sg_status=null`은 최대 1개
-2. **하루 1개의 확정 퇴근**: 같은 `sg_user + sg_date`에 `sg_type=퇴근, sg_status=null`은 최대 1개
-3. **요청 대상 존재**: `sg_status=요청`인 레코드는 `sg_parent`가 반드시 존재
+1. **하루 1개의 확정 출근**: 같은 `sg_user + sg_date`에 `sg_type=출근, sg_status=정상`은 최대 1개
+2. **하루 1개의 확정 퇴근**: 같은 `sg_user + sg_date`에 `sg_type=퇴근, sg_status=정상`은 최대 1개
+3. **요청 대상 존재**: `sg_status=정정요청`인 레코드는 `sg_parent`가 반드시 존재
 4. **승인/반려 대상 존재**: `sg_status=승인/반려`인 레코드는 `sg_parent`가 요청 레코드를 가리켜야 함
 
 ### 5.2 검증 쿼리 예시
@@ -286,7 +286,7 @@ def validate_single_valid_attendance(sg_user, sg_date, sg_type):
             ['sg_user', 'is', sg_user],
             ['sg_date', 'is', sg_date],
             ['sg_type', 'is', sg_type],
-            ['sg_status', 'is', None],
+            ['sg_status', 'is', '정상'],
         ],
         ['id']
     )
