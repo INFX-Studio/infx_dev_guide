@@ -65,7 +65,8 @@ inFX 스타일에 맞는 코드를 생성한다.
 | 파일 | 설명 |
 |------|------|
 | [`INFX_BOOKSTACK_STYLE_GUIDE.md`](INFX_BOOKSTACK_STYLE_GUIDE.md) | 사내 위키(BookStack) 문서 작성 규칙 |
-| [`APP_UPDATE_GUIDE.md`](APP_UPDATE_GUIDE.md) | 앱 업데이트 화면 구현 기술 및 삽질 기록 |
+| [`APP_UPDATE_GUIDE.md`](APP_UPDATE_GUIDE.md) | 앱 업데이트 화면 구현 기술 및 삽질 기록 (PySide2) |
+| [`WIN_APP_UPDATE_PROCESS_GUIDE.md`](WIN_APP_UPDATE_PROCESS_GUIDE.md) | Windows 앱 업데이트 프로세스 구현 가이드 (WPF/WinForms) |
 | [`INFX_DEV_FAQ.md`](INFX_DEV_FAQ.md) | 개발 중 자주 나오는 질문과 답변 |
 
 ---
