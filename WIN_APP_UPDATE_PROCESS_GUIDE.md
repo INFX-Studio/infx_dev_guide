@@ -698,3 +698,142 @@ private async Task CheckUpdateAsync()
 ## 11. 관련 문서
 
 - [`APP_UPDATE_GUIDE.md`](APP_UPDATE_GUIDE.md) — PySide2 앱 업데이트 스플래시 스크린 구현 (별도 프로세스 방식)
+
+---
+
+## 12. GitHub PAT 인증 관리
+
+### 12.1 PAT를 사용하는 이유
+
+Private 리포지토리에서 릴리스 정보를 조회하거나, 인증되지 않은 요청의 API Rate Limit(시간당 60회)을 피하기 위해 GitHub PAT(Personal Access Token)를 사용한다.
+
+### 12.2 PAT 설정 패턴
+
+서비스 클래스 안에 PAT와 만료일을 상수/정적 멤버로 관리한다.
+
+```csharp
+public sealed class GitHubUpdateService : IDisposable
+{
+    // GitHub PAT 인증 — 만료일: {EXPIRY_DATE}
+    private const string PATToken = "{YOUR_PAT}";
+    private static readonly DateTime TokenExpiry = new DateTime({YEAR}, {MONTH}, {DAY});
+
+    /// <summary>PAT 만료 여부를 반환한다.</summary>
+    public static bool IsTokenExpired() => DateTime.Today > TokenExpiry;
+
+    /// <summary>PAT 만료일 문자열 (사용자 안내 메시지용).</summary>
+    public static string TokenExpiryString => "{EXPIRY_DATE}";
+
+    private static HttpClient CreateDefaultClient()
+    {
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("{APP_NAME}-Updater/1.0");
+        // PAT가 만료되지 않은 경우에만 인증 헤더 추가
+        if (!IsTokenExpired())
+        {
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", PATToken);
+        }
+        return client;
+    }
+}
+```
+
+### 12.3 PAT 만료 시 경고 다이얼로그 패턴
+
+업데이트 버튼 클릭 시 PAT 만료 여부를 먼저 확인하고, 만료됐으면 사용자에게 알린 뒤 내부 네트워크 검색은 계속 진행한다.
+
+```csharp
+private void OnShowUpdateDialogRequested(object? sender, EventArgs e)
+{
+    // PAT 만료 여부 확인 — 만료됐어도 내부 네트워크 검색은 계속 진행한다
+    if (GitHubUpdateService.IsTokenExpired())
+    {
+        MessageDialog.ShowWarning(
+            $"GitHub 인증 토큰이 만료되었습니다 (만료일: {GitHubUpdateService.TokenExpiryString}).\n" +
+            "인터넷을 통한 GitHub 업데이트 확인이 불가능합니다.\n" +
+            "내부 네트워크 경로에서만 업데이트를 확인합니다.",
+            "GitHub 토큰 만료");
+    }
+
+    // 이후 업데이트 다이얼로그 표시 및 검색 시작...
+}
+```
+
+### 12.4 체크리스트
+
+- [ ] PAT에 `Contents: Read` 권한이 있는가?
+- [ ] PAT 만료일이 코드에 명시되어 있는가?
+- [ ] 만료 시 사용자에게 안내 메시지를 표시하는가?
+- [ ] 만료 후에도 내부 네트워크 검색은 계속 진행되는가?
+
+---
+
+## 13. 업데이트 다이얼로그 이동 방지
+
+업데이트 진행 중 사용자가 다이얼로그나 메인 창을 이동시키지 못하도록 잠근다.
+
+### 13.1 UpdateDialog 이동 불가 설정
+
+`WindowStyle="None"`인 커스텀 다이얼로그는 타이틀바가 없으므로, 루트 Border의 `MouseDown` 핸들러에서 `DragMove()`를 호출하면 드래그 이동이 가능해진다.
+업데이트 진행 중에는 이 핸들러에서 `DragMove()`를 호출하지 않아야 한다.
+
+```csharp
+// UpdateDialog.xaml.cs
+private void RootBorder_MouseDown(object sender, MouseButtonEventArgs e)
+{
+    // 업데이트 진행 중 창 이동 방지 — DragMove() 호출 안 함
+}
+```
+
+### 13.2 메인 윈도우 이동 방지 (업데이트 다이얼로그 표시 중)
+
+표준 타이틀바가 있는 메인 윈도우는 WndProc으로 `SC_MOVE` 메시지를 차단한다.
+
+```csharp
+// MainWindow.xaml.cs
+private bool _isUpdateDialogOpen;
+
+// OnSourceInitialized에서 훅 등록
+protected override void OnSourceInitialized(EventArgs e)
+{
+    base.OnSourceInitialized(e);
+    var source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
+    source?.AddHook(MainWindowWndProc);
+}
+
+// WndProc: 업데이트 다이얼로그가 열려있는 동안 SC_MOVE 차단
+private IntPtr MainWindowWndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+{
+    const int WM_SYSCOMMAND = 0x0112;
+    const int SC_MOVE = 0xF010;
+    if (_isUpdateDialogOpen && msg == WM_SYSCOMMAND && (wParam.ToInt32() & 0xFFF0) == SC_MOVE)
+    {
+        handled = true;
+    }
+    return IntPtr.Zero;
+}
+
+// 업데이트 다이얼로그 표시 시: 플래그 활성화
+private void OnShowUpdateDialogRequested(object? sender, EventArgs e)
+{
+    _isUpdateDialogOpen = true;
+    // ... 다이얼로그 생성 및 표시 ...
+}
+
+// 업데이트 다이얼로그 닫힘 시: 플래그 해제
+private void OnUpdateDialogClosed(object? sender, EventArgs e)
+{
+    _isUpdateDialogOpen = false;
+    // ... 이벤트 해제 ...
+}
+```
+
+> ⚠️ **주의**: `System.Windows.Interop` 네임스페이스 using이 필요하다.
+
+### 13.3 체크리스트
+
+- [ ] UpdateDialog의 `RootBorder_MouseDown`에서 `DragMove()` 호출을 제거했는가?
+- [ ] MainWindow에 `_isUpdateDialogOpen` 플래그가 있는가?
+- [ ] `OnSourceInitialized`에서 WndProc 훅이 등록되는가?
+- [ ] 다이얼로그 닫힘 시 `_isUpdateDialogOpen`을 `false`로 초기화하는가?
