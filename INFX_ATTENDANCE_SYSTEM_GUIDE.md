@@ -253,12 +253,53 @@ def get_attendance_status(original_attendance):
 
 ### 4.3 승인/반려
 
-- 승인담당자(팀장/실장)만 처리 가능
+- 승인담당자만 처리 가능
 - 승인 시: 승인 레코드 생성 → 새 확정 출퇴근 레코드 생성
 - 반려 시: 반려 레코드 생성 (사유 필수)
 - 반려 후 재요청 가능 (횟수 제한 없음)
 
-### 4.4 불변성 규칙
+### 4.4 승인 체계
+
+#### 조직 구조와 ShotGrid 필드 매핑
+
+| 직급 | ShotGrid 필드 | 설명 |
+|------|--------------|------|
+| 팀원 | `sg_part_supervisor` = 실장 | 실장이 정정 요청을 승인 |
+| 팀장 | `sg_part_supervisor` = 실장 | 실장이 정정 요청을 승인 |
+| 실장 | `sg_part_supervisor` = 비어있음 | 상위 승인자 없음 (직접 수정 가능) |
+
+#### 승인 권한 판별
+
+승인 대기 뱃지 표시 여부는 **사전 판별 없이** `Attendance.get_pending_corrections()`를 호출하여 결과가 있으면 표시한다. department와 무관하게, 요청자의 `sg_part_supervisor`에 등록된 사람만 승인할 수 있다.
+
+#### 정정 요청 조회 범위 (누구의 정정을 볼 수 있는가)
+
+`Attendance.get_pending_corrections(approver)` 메서드의 필터링 기준:
+
+1. `sg_status = '정정요청'`인 레코드 전체 조회
+2. **요청자의 `sg_part_supervisor`에 승인자가 포함**되고 **본인 건이 아닌 것**만 필터링
+3. 이미 승인/반려된 요청은 제외
+
+```python
+# 요청자의 sg_part_supervisor에 승인자가 포함된 것만 필터링
+supervisors = item.get('sg_user.HumanUser.sg_part_supervisor') or []
+if isinstance(supervisors, dict):
+    supervisors = [supervisors]
+for sup in supervisors:
+    if sup and sup.get('id') == approver_id:
+        filtered.append(item)
+        break
+```
+
+#### 승인 흐름 요약
+
+| 요청자 | 승인자 | 판별 기준 |
+|--------|--------|----------|
+| 팀원 | 요청자의 `sg_part_supervisor` | 요청자의 실장이 승인 |
+| 팀장 | 요청자의 `sg_part_supervisor` | 요청자의 실장이 승인 |
+| 실장 | 본인 (직접 수정 가능) | `sg_part_supervisor` 비어있음 → 정정 요청 없이 직접 시간 변경 |
+
+### 4.5 불변성 규칙
 
 - **모든 레코드는 생성 후 수정하지 않음**
 - 상태 변경은 새 레코드 생성으로 표현
