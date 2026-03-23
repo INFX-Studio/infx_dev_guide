@@ -156,7 +156,7 @@ private async Task<InstallerInfo?> FindLocalInstallerAsync(string sourceDir, Can
         return null;
 
     var files = await filesTask;
-    
+
     // 가장 높은 버전 찾기
     InstallerInfo? best = null;
     foreach (var file in files)
@@ -637,11 +637,13 @@ private void OnUpdateErrorRequested(object? sender, string errorMessage)
   ├─ IsUpdateChecking = true
   │   └─ MainWindow: 다이얼로그 생성, 3단계 모두 Running 상태 설정
   │
-  ├─ FindLatestInstallerAsync() 병렬 실행
-  │   ├─ Step 0 완료 → UpdateStepCompleted(0, success)
-  │   ├─ Step 1 완료 → UpdateStepCompleted(1, success)
-  │   └─ Step 2 완료 → UpdateStepCompleted(2, success)
-  │   (첫 성공 시 linkedCts.Cancel()로 나머지 태스크 취소)
+  ├─ _cachedInstaller 존재?
+  │   ├─ YES → 캐시된 인스톨러 즉시 사용 (검색 스킵, 1초 딜레이 스킵)
+  │   └─ NO  → FindLatestInstallerAsync() 병렬 실행
+  │            ├─ Step 0 완료 → UpdateStepCompleted(0, success)
+  │            ├─ Step 1 완료 → UpdateStepCompleted(1, success)
+  │            └─ Step 2 완료 → UpdateStepCompleted(2, success)
+  │            (첫 성공 시 linkedCts.Cancel()로 나머지 태스크 취소)
   │
   └─ 최종 결과 분기
        ├─ 인스톨러 발견 + 버전 높음 → UpdateConfirmRequested
@@ -656,9 +658,10 @@ private void OnUpdateErrorRequested(object? sender, string errorMessage)
 
 **핵심 포인트:**
 
-1. **병렬 실행, 순차 완료 이벤트**: 3개 소스가 동시에 실행되지만, 완료 이벤트는 각각 개별로 발화된다.
-2. **첫 성공 시 취소**: 첫 번째 성공 결과가 나오면 `linkedCts.Cancel()`로 나머지 태스크를 취소하여 불필요한 대기를 방지한다.
-3. **이벤트 기반 UI 업데이트**: ViewModel → View로 이벤트를 통해 상태를 전달하고, View에서 다이얼로그 메서드를 호출한다.
+1. **인스톨러 캐시 재사용**: `CheckUpdateAsync`에서 찾은 인스톨러 정보를 `_cachedInstaller`에 캐시하여, 업데이트 버튼 클릭 시 재검색 없이 즉시 사용한다. 캐시 사용 시 검색 단계와 1초 딜레이를 모두 스킵하여 응답 속도를 크게 개선한다.
+2. **병렬 실행, 순차 완료 이벤트**: 캐시가 없을 때만 3개 소스가 동시에 실행되며, 완료 이벤트는 각각 개별로 발화된다.
+3. **첫 성공 시 취소**: 첫 번째 성공 결과가 나오면 `linkedCts.Cancel()`로 나머지 태스크를 취소하여 불필요한 대기를 방지한다.
+4. **이벤트 기반 UI 업데이트**: ViewModel → View로 이벤트를 통해 상태를 전달하고, View에서 다이얼로그 메서드를 호출한다.
 
 ---
 
@@ -675,6 +678,8 @@ public MainViewModel(EnvironmentService envService, GitHubUpdateService gitHubSe
     _ = CheckUpdateAsync(); // 백그라운드에서 자동 체크
 }
 
+private InstallerInfo? _cachedInstaller; // 시작 시 찾은 인스톨러 캐시
+
 private async Task CheckUpdateAsync()
 {
     await Task.Delay(2000); // 앱 로드 후 2초 대기
@@ -689,6 +694,9 @@ private async Task CheckUpdateAsync()
 
     var compareResult = CompareVersions(localVersion, installer.Version);
     HasUpdate = compareResult < 0;
+
+    if (HasUpdate)
+        _cachedInstaller = installer; // 업데이트 버튼 클릭 시 재사용
 }
 ```
 
