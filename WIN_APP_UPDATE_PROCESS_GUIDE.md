@@ -235,9 +235,13 @@ public async Task<(string Version, string DownloadUrl)?> GetLatestReleaseAsync(C
         a.Name?.StartsWith(InstallerPrefix, StringComparison.OrdinalIgnoreCase) == true &&
         a.Name?.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) == true);
 
-    if (installerAsset?.BrowserDownloadUrl is null) return null;
+    if (installerAsset is null || installerAsset.Id == 0) return null;
 
-    return (version, installerAsset.BrowserDownloadUrl);
+    // Private 리포지토리에서는 browser_download_url 대신 API URL을 사용해야 한다.
+    // 자세한 이유는 "14. 트러블슈팅: Private 리포 에셋 다운로드" 참조.
+    var apiDownloadUrl = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/assets/{installerAsset.Id}";
+
+    return (version, apiDownloadUrl);
 }
 ```
 
@@ -258,6 +262,9 @@ private sealed class GitHubRelease
 
 private sealed class GitHubAsset
 {
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
@@ -283,8 +290,14 @@ public async Task<string?> DownloadInstallerAsync(
 
     progressCallback?.Invoke(0);
 
-    using var response = await _httpClient.GetAsync(
-        downloadUrl,
+    // API URL + Accept: application/octet-stream 으로 바이너리 다운로드
+    // Private 리포에서는 이 헤더가 필수다. "14. 트러블슈팅" 참조.
+    var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+    request.Headers.Accept.Add(
+        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/octet-stream"));
+
+    using var response = await _httpClient.SendAsync(
+        request,
         HttpCompletionOption.ResponseHeadersRead,
         cts.Token);
 
@@ -870,3 +883,119 @@ private void OnUpdateDialogClosed(object? sender, EventArgs e)
 - [ ] MainWindow에 `_isUpdateDialogOpen` 플래그가 있는가?
 - [ ] `OnSourceInitialized`에서 WndProc 훅이 등록되는가?
 - [ ] 다이얼로그 닫힘 시 `_isUpdateDialogOpen`을 `false`로 초기화하는가?
+
+---
+
+## 14. 트러블슈팅: Private 리포 에셋 다운로드
+
+### 14.1 문제 현상
+
+Private 리포지토리의 GitHub 릴리스에서 인스톨러를 다운로드할 때, `browser_download_url`을 사용하면 다운로드가 실패한다.
+HTTP 응답은 성공(200)처럼 보이지만 실제로는 에러 XML이 반환되거나, 403 Forbidden이 발생한다.
+
+### 14.2 원인
+
+GitHub의 `browser_download_url`은 Amazon S3로 **302 리다이렉트**된다.
+이때 `HttpClient`가 리다이렉트를 따라가면서 **`Authorization: Bearer {PAT}` 헤더도 함께 전달**한다.
+
+S3는 자체 인증 체계를 사용하므로, 요청에 포함된 GitHub PAT를 **잘못된 인증 정보**로 간주하고 거부한다.
+
+```
+[요청 흐름 - 실패 케이스]
+
+GET https://github.com/{owner}/{repo}/releases/download/v1.2.3/Installer.exe
+Authorization: Bearer ghp_xxxx...
+    |
+    +-- 302 --> https://objects.githubusercontent.com/... (S3)
+    |           Authorization: Bearer ghp_xxxx...  <-- 이 헤더가 문제
+    |
+    +-- S3 응답: 403 Forbidden 또는 에러 XML
+       (GitHub 토큰을 S3 인증으로 해석하려다 실패)
+```
+
+### 14.3 해결 방법
+
+`browser_download_url` 대신 **GitHub API URL**로 요청하고, `Accept: application/octet-stream` 헤더를 사용한다.
+
+```
+[요청 흐름 - 성공 케이스]
+
+GET https://api.github.com/repos/{owner}/{repo}/releases/assets/{asset_id}
+Authorization: Bearer ghp_xxxx...
+Accept: application/octet-stream
+    |
+    +-- GitHub API가 인증 확인 후 302 --> S3 서명된 URL로 리다이렉트
+    |   (Authorization 헤더 없이 리다이렉트 - S3 서명 URL 자체에 인증 포함)
+    |
+    +-- S3 응답: 200 OK + 바이너리 데이터
+```
+
+### 14.4 코드 수정 포인트
+
+**1) 릴리스 조회 시 - API URL 생성**
+
+```csharp
+// 잘못된 방법: browser_download_url 직접 사용
+return (version, installerAsset.BrowserDownloadUrl);
+
+// 올바른 방법: API URL 생성 (asset id 사용)
+var apiUrl = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/assets/{installerAsset.Id}";
+return (version, apiUrl);
+```
+
+**2) 다운로드 시 - Accept 헤더 설정**
+
+```csharp
+// 잘못된 방법: 단순 GET 요청
+using var response = await _httpClient.GetAsync(downloadUrl, ...);
+
+// 올바른 방법: Accept: application/octet-stream 헤더 추가
+var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+request.Headers.Accept.Add(
+    new MediaTypeWithQualityHeaderValue("application/octet-stream"));
+using var response = await _httpClient.SendAsync(request, ...);
+```
+
+**3) 응답 모델 - Id 필드 추가**
+
+```csharp
+private sealed class GitHubAsset
+{
+    [JsonPropertyName("id")]
+    public long Id { get; set; }     // API URL 생성에 필요
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    // browser_download_url은 Private 리포에서 사용하면 안 되지만,
+    // Public 리포 호환성을 위해 모델에는 유지한다.
+    [JsonPropertyName("browser_download_url")]
+    public string? BrowserDownloadUrl { get; set; }
+}
+```
+
+### 14.5 Public vs Private 리포 동작 차이
+
+| 항목 | Public 리포 | Private 리포 |
+|------|------------|-------------|
+| `browser_download_url` | 인증 없이 다운로드 가능 | S3 리다이렉트 시 Authorization 충돌로 실패 |
+| API URL + `Accept: octet-stream` | 정상 동작 | 정상 동작 |
+| PAT 필요 여부 | Rate Limit 회피용 (선택) | 필수 |
+
+> **결론**: API URL + `Accept: application/octet-stream` 방식은 Public/Private 모두에서 동작하므로,
+> 리포 공개 여부와 무관하게 이 방식을 기본으로 사용한다.
+
+### 14.6 디버깅 팁
+
+다운로드 실패 시 응답 본문을 확인하면 원인을 파악할 수 있다.
+
+```csharp
+if (!response.IsSuccessStatusCode)
+{
+    var body = await response.Content.ReadAsStringAsync();
+    _logger.LogWarning("다운로드 실패: {StatusCode}, Body: {Body}",
+        response.StatusCode, body);
+    // S3 에러 시 XML 형식:
+    // <Error><Code>InvalidArgument</Code><Message>...</Message></Error>
+}
+```
