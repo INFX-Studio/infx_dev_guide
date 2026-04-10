@@ -488,6 +488,18 @@ def validate_single_valid_attendance(sg_user, sg_date, sg_type):
 | `오후1반반차` | 오후1반반차 | 15~17시 (2시간) |
 | `오후2반반차` | 오후2반반차 | 17~19시 (2시간) |
 
+#### 무급휴가 sg_type 값 (무급휴가 엔티티에서 동기화)
+
+| Code | Display Name | 출처 |
+|------|--------------|------|
+| `무급휴가(일반)` | 무급휴가(일반) | 무급휴가 엔티티 |
+| `무급휴가(병가)` | 무급휴가(병가) | 무급휴가 엔티티 |
+| `무급휴가(육아)` | 무급휴가(육아) | 무급휴가 엔티티 |
+| `무급휴가(기타)` | 무급휴가(기타) | 무급휴가 엔티티 |
+| `병가` | 병가 | 무급휴가 엔티티 |
+| `경조` | 경조 | 무급휴가 엔티티 |
+| `휴직휴가` | 휴직휴가 | 무급휴가 엔티티 |
+
 ### 7.5 출퇴근 현황과의 관계
 
 ```
@@ -496,14 +508,116 @@ def validate_single_valid_attendance(sg_user, sg_date, sg_type):
   ├─ 출퇴근 기록 (CustomNonProjectEntity10) 조회
   │   - 출근/퇴근/석식/점심스킵
   │
-  ├─ 유급휴가 기록 (CustomNonProjectEntity09) 조회
-  │   - 연차/반차/반반차
+  ├─ 휴가 기록 (CustomNonProjectEntity09) 조회
+  │   - 유급휴가: 연차/반차/반반차
+  │   - 무급휴가: 무급휴가(일반/병가/육아/기타), 병가, 경조, 휴직휴가
   │
   └─ 무급휴가 기록 (CustomNonProjectEntity01) 참조
-      - 장기 휴직 여부 확인
+      - 기간이 정해지지 않은 무급휴가 진행 중 여부 확인
+      - 확정된 무급휴가는 휴가 엔티티로 동기화 완료
 ```
 
-### 7.6 Code 규칙
+### 7.6 무급휴가 동기화 정책
+
+무급휴가(`CustomNonProjectEntity01`)는 기간 단위로 관리되지만, 출퇴근 현황 조회의 편의성을 위해 **휴가 엔티티(`CustomNonProjectEntity09`)에 날짜별 레코드로 동기화**한다.
+
+#### 동기화 방식
+
+| 항목 | 정책 |
+|------|------|
+| **동기화 주체** | ValiDuck 스케줄러 (C:/dev/infx/validuck) |
+| **동기화 주기** | 매일 오전 7시 |
+| **입력 방식** | 당일 날짜만 생성 (과거/미래 한꺼번에 생성 금지) |
+| **기간 변경 대응** | 기간이 줄어들면 이미 생성된 미래 레코드는 유지 (역사적 기록)<br>기간이 늘어나면 다음 날 7시에 새로 생성 |
+| **종류 구분** | 무급휴가 엔티티의 `sg_leave_type` 값을 그대로 휴가 엔티티 `sg_type`으로 사용 |
+| **중복 방지** | `sg_user + sg_date + sg_type` 조합으로 중복 체크 |
+| **소스 오브 트루스** | 확정 후(익일)는 휴가 엔티티가 소스 오브 트루스 |
+
+#### 아키텍처
+
+```
+무급휴가 엔티티(기간 관리) 
+    ↓ (ValiDuck 매일 7시)
+flova.timelog.attendance.sync_unpaid_leave_for_date()
+    - 무급휴가 엔티티 조회
+    - 당일 해당자 필터링
+    - 중복 체크 (user+date+type)
+    - 휴가 엔티티 생성
+    ↓
+휴가 엔티티(날짜별 레코드) ← 출퇴근 현황 조회 시 활용
+```
+
+#### ValiDuck 플러그인 설정
+
+**플러그인 파일**: `validuck/plugins/unpaid_leave_sync.py`
+
+| 설정 | 값 |
+|------|-----|
+| **플러그인 이름** | `무급휴가_동기화` |
+| **스케줄** | 매일 오전 7:00 (`schedule().every().day.at('07:00')`) |
+| **실행 함수** | `sync_unpaid_leave_for_date()` |
+| **활성화** | `enabled = True` |
+
+**플러그인 코드**:
+
+```python
+from core import Plugin, schedule
+from flova.timelog.attendance import sync_unpaid_leave_for_date
+
+
+class UnpaidLeaveSyncPlugin(Plugin):
+    """무급휴가 동기화 플러그인."""
+
+    name = '무급휴가_동기화'
+    description = '무급휴가를 휴가 엔티티에 날짜별로 동기화한다'
+    schedules = [schedule().every().day.at('07:00')]
+    enabled = True
+
+    def execute(self) -> None:
+        """매일 07:00에 실행."""
+        created_records = sync_unpaid_leave_for_date()
+        self.log.info(f'동기화 완료: {len(created_records)}개 레코드 생성')
+```
+
+**실행 방법**:
+
+```bash
+# Validuck 전체 실행
+cd C:/dev/infx/validuck
+python validuck.py
+
+# 특정 플러그인만 한 번 실행 (테스트용)
+python -c "
+from core import ValiDuck
+duck = ValiDuck()
+duck.load_plugins()
+duck.run_once('무급휴가_동기화')
+"
+```
+
+#### 동기화 함수 인터페이스
+
+```python
+# flova/timelog/attendance.py
+
+def sync_unpaid_leave_for_date(target_date=None):
+    """
+    지정된 날짜의 무급휴가를 휴가 엔티티에 동기화한다.
+    
+    Args:
+        target_date: 동기화 대상 날짜 (None이면 오늘)
+    """
+
+
+def create_paid_leave_record(user, date, leave_type, source_unpaid_id):
+    """
+    휴가 엔티티 레코드를 생성한다 (멱등성 보장).
+    
+    중복 체크: sg_user + sg_date + sg_type 조합이 이미 존재하면 스킵
+    """
+```
+
+### 7.7 Code 규칙
 
 ```
 {이름}_{YYYYMMDD}_{휴가유형}
@@ -514,7 +628,7 @@ def validate_single_valid_attendance(sg_user, sg_date, sg_type):
 - `홍길동_20260410_오전반차`
 - `홍길동_20260415_오전1반반차`
 
-### 7.7 기존 TimeLog 휴가 데이터 마이그레이션
+### 7.8 기존 TimeLog 휴가 데이터 마이그레이션
 
 기존에 `TimeLog` 엔티티(프로젝트='휴가')에 저장된 유급휴가 데이터를 새 엔티티로 이관한다.
 
@@ -574,3 +688,48 @@ def validate_single_valid_attendance(sg_user, sg_date, sg_type):
 **이유**:
 - 휴가 사유 추적 및 통계 필요
 - 연차/반차 구분과 별개로 구체적 사유 기록
+
+---
+
+## 9. 백필 완료 (2026-04-09)
+
+### 9.1 실행 정보
+
+| 항목 | 값 |
+|------|-----|
+| **백필 실행일** | 2026-04-09 |
+| **대상 기간** | 2026-01-01 ~ 2026-04-09 (99일) |
+| **생성된 레코드** | 약 600개 (3명 × 99일) |
+| **스킵된 레코드** | 0개 (이전 7일 백필 제외) |
+| **오류** | 0개 |
+
+### 9.2 필드 값 추가
+
+**추가된 sg_type 값** (CustomNonProjectEntity09):
+- `무급휴가(일반)`
+- `무급휴가(병가)`
+- `무급휴가(육아)`
+- `무급휴가(기타)`
+- `병가`
+- `경조`
+- `휴직휴가`
+
+### 9.3 백필 스크립트
+
+```bash
+# 최근 N일 백필
+cd C:/dev/infx/my_flova
+python backfill_recent.py --days 7
+
+# 전체 기간 백필 (2026-01-01부터)
+python backfill_all.py
+
+# dry-run 모드로 미리보기
+python backfill_all.py --dry-run
+```
+
+### 9.4 참고사항
+
+- 백필 중복 실행해도 중복 체크(`sg_user + sg_date + sg_type`)로 인해 안전함
+- 이미 생성된 레코드는 스킵됨
+- 향후 무급휴가는 ValiDuck 스케줄러(매일 07:00)로 자동 동기화됨
