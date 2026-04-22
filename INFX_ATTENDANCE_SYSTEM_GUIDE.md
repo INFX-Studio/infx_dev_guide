@@ -6,13 +6,13 @@
 
 - 프로젝트 타임로그 웹서비스에 출퇴근 기능 추가
 - 출근/퇴근 시간 기록 및 근무시간 자동 계산
-- 정정 요청 및 승인 워크플로우 지원
+- 정정 신청 및 승인 워크플로우 지원
 
 ### 1.2 주요 기능
 
 - 출근/퇴근 버튼으로 시간 기록
 - 일별/월별 근무시간 계산 (야근 포함)
-- 정정 요청 → 팀장 승인/반려 워크플로우
+- 정정 신청 → 팀장 승인/반려 워크플로우
 - 모든 이력 보존 (완전 불변 이벤트 로그)
 - 데이터 무결성 검증 시스템
 
@@ -25,7 +25,7 @@
 - **완전 불변 이벤트 로그 방식** 채택
 - 엔티티 1개로 모든 기록 관리
 - **레코드는 생성만 하고, 절대 수정하지 않음**
-- 출퇴근/정정요청/승인/반려를 각각 별도 레코드로 기록
+- 출퇴근/정정신청/승인/반려를 각각 별도 레코드로 기록
 - 2개 필드 조합(`sg_type` + `sg_status`)으로 레코드 종류 구분
 
 ### 2.2 엔티티 정보
@@ -43,7 +43,7 @@
 | `sg_user` | 사용자 | entity(HumanUser) | O | 레코드 종류별 의미 다름 (아래 표 참고) |
 | `sg_date` | 근무일 | date | O | 출퇴근 날짜 |
 | `sg_type` | 구분 | list | O | `출근`, `퇴근` |
-| `sg_status` | 상태 | list | - | `정상`, `정정요청`, `승인`, `반려` |
+| `sg_status` | 상태 | list | - | `정상`, `정정신청`, `승인`, `반려` |
 | `sg_time` | 시간 | date_time | - | 출퇴근 시간 또는 정정 희망 시간 |
 | `sg_parent` | Parent | entity(Self) | - | 연결 대상 레코드 |
 | `sg_reason` | 사유 | text | - | 정정 사유 또는 반려 사유 |
@@ -53,7 +53,7 @@
 | 레코드 종류 | sg_time 의미 |
 |---------------|----------------|
 | 정상 (sg_status='정상') | 실제 출퇴근 시간 |
-| 정정요청 (sg_status='정정요청') | 정정 희망 시간 |
+| 정정신청 (sg_status='정정신청') | 정정 희망 시간 |
 | 승인/반려 | null (의미 없음) |
 
 ### 2.5 sg_user 필드 용도
@@ -61,7 +61,7 @@
 | 레코드 종류 | sg_user 의미 |
 |---------------|----------------|
 | 확정 출퇴근 | 대상 직원 (본인) |
-| 정정 요청 | 대상 직원 (본인) |
+| 정정 신청 | 대상 직원 (본인) |
 | 승인/반려 | 처리자 (팀장) |
 ### 2.6 시스템 필드 활용
 
@@ -84,7 +84,7 @@
 | Code | Display Name | 설명 |
 |------|--------------|------|
 | `정상` | 정상 | 확정된 출퇴근 기록 |
-| `정정요청` | 정정요청 | 정정 요청 |
+| `정정신청` | 정정신청 | 정정 신청 |
 | `승인` | 승인 | 정정 승인 |
 | `반려` | 반려 | 정정 반려 |
 
@@ -94,8 +94,8 @@
 |-----------|---------|------|----------------------|
 | 정상 | 출근 | 확정된 출근 | - 또는 이전 출근 레코드 |
 | 정상 | 퇴근 | 확정된 퇴근 | - 또는 이전 퇴근 레코드 |
-| 정정요청 | 출근 | 출근 정정 요청 | 원본 출근 레코드 |
-| 정정요청 | 퇴근 | 퇴근 정정 요청 | 원본 퇴근 레코드 |
+| 정정신청 | 출근 | 출근 정정 신청 | 원본 출근 레코드 |
+| 정정신청 | 퇴근 | 퇴근 정정 신청 | 원본 퇴근 레코드 |
 | 승인 | 출근 | 출근 정정 승인 | 승인한 요청 레코드 |
 | 승인 | 퇴근 | 퇴근 정정 승인 | 승인한 요청 레코드 |
 | 반려 | 출근 | 출근 정정 반려 | 반려한 요청 레코드 |
@@ -109,7 +109,7 @@
 
 예시:
 - `홍길동_20260305_출근_정상_140530` — 확정된 출근
-- `홍길동_20260305_출근_정정요청_163000` — 출근 정정 요청
+- `홍길동_20260305_출근_정정신청_163000` — 출근 정정 신청
 - `홍길동_20260305_출근_승인_170000` — 출근 정정 승인
 - `홍길동_20260305_출근_반려_170500` — 출근 정정 반려
 
@@ -129,13 +129,13 @@
    - sg_time = 퇴근 시간
 ```
 
-### 3.2 정정 요청 → 승인
+### 3.2 정정 신청 → 승인
 
 ```
 A0: 출근 (09:30)
  │
- └─ R1: 출근 정정 요청 (08:00으로 변경 요청)
-     │  - sg_status = 정정요청
+└─ R1: 출근 정정 신청 (08:00으로 변경 신청)
+    │  - sg_status = 정정신청
      │  - sg_time = 08:00
      │  - sg_parent = A0
      │  - sg_reason = "지하철 지연으로 늦게 기록됨"
@@ -151,12 +151,12 @@ A0: 출근 (09:30)
               - sg_parent = A0
 ```
 
-### 3.3 정정 요청 → 반려 → 재요청 → 승인
+### 3.3 정정 신청 → 반려 → 재신청 → 승인
 
 ```
 A0: 출근 (09:30)
  │
- ├─ R1: 출근 정정 요청 (08:00)
+├─ R1: 출근 정정 신청 (08:00)
  │   │  - sg_time = 08:00
  │   │  - sg_parent = A0
  │   │
@@ -165,7 +165,7 @@ A0: 출근 (09:30)
  │        - sg_parent = R1
  │        - sg_reason = "증빙 부족"
  │
- └─ R2: 출근 정정 요청 (08:30) — 재요청
+└─ R2: 출근 정정 신청 (08:30) — 재신청
      │  - sg_time = 08:30
      │  - sg_parent = A0
      │  - sg_reason = "증빙 첨부함"
@@ -197,14 +197,14 @@ def get_attendance_status(original_attendance):
     )
     
     if not related:
-        return '확정'  # 정정 요청 없음
+        return '확정'  # 정정 신청 없음
     
     latest = related[0]
     status = latest.get('sg_status')
     
     if status == '정상':
         return '확정'  # 새 확정 레코드가 생성됨 (승인 완료)
-    elif status == '정정요청':
+    elif status == '정정신청':
         return '대기'  # 승인 대기 중
     elif status == '승인':
         return '승인됨'  # 승인 처리됨 (새 확정 레코드 생성 대기)
@@ -289,61 +289,97 @@ overtime_minutes = max(0, work_minutes - 480분)  # 야근시간
 **확인 다이얼로그 메시지 예시**
 
 ```
-아직 의무 근무시간(8시간)이 채워지지 않았습니다.
+아직 의무 근무시간(9시간)이 채워지지 않았습니다.
 퇴근 가능 시간까지 N시간 N분 N초 남았습니다.
 
-지금 퇴근 처리하시겠습니까?
+어떤 방식으로 처리할까요?
 
-[확인]  [취소]
+[일반 퇴근]  [취소]  [외근 후 퇴근]
 ```
 
-- **확인** 선택 시: 퇴근 처리 진행
+- **일반 퇴근** 선택 시: 실제 클릭 시각으로 퇴근 처리 진행
+- **외근 후 퇴근** 선택 시: 실제 클릭 시각 퇴근 + 19:00 퇴근 정정 신청 동시 생성
 - **취소** 선택 시: 퇴근 처리 없이 닫기
 
-### 4.3 정정 요청
+### 4.3 정정 신청
 
-- 출퇴근 시간 클릭 시 정정 요청 다이얼로그 표시
+- 출퇴근 시간 클릭 시 정정 신청 다이얼로그 표시
 - 희망 시간과 정정 사유 입력 필수
-- 요청 레코드 생성 (`sg_status = '정정요청'`)
+- 요청 레코드 생성 (`sg_status = '정정신청'`)
 
-### 4.4 승인/반려
+### 4.4 외근 후 퇴근
+
+조기 퇴근 확인 다이얼로그에서 `외근 후 퇴근`을 선택하면, 일반 퇴근과 별도로 아래 순서로 기록한다.
+
+1. 사용자가 버튼을 누른 실제 시각으로 `퇴근 / 정상` 레코드를 먼저 생성한다.
+2. 같은 날 `19:00:00`으로 `퇴근 / 정정신청` 레코드를 생성한다.
+3. 이때 `sg_reason`은 사용자 입력 없이 자동으로 `외근 후 퇴근`으로 기록한다.
+4. 승인자가 승인하면 `퇴근 / 승인` 레코드를 생성한 뒤 `퇴근 / 정상(19:00:00)` 레코드를 새로 생성한다.
+5. 승인자가 반려하면 `퇴근 / 반려` 레코드만 남기고, 처음 기록한 실제 퇴근 시각의 `퇴근 / 정상`을 최종 퇴근으로 사용한다.
+
+```
+A0: 퇴근 (17:03) — 실제 버튼 클릭 시각
+ │
+ └─ R1: 퇴근 정정 신청 (19:00)
+     │  - sg_status = 정정신청
+     │  - sg_time = 19:00
+     │  - sg_parent = A0
+     │  - sg_reason = "외근 후 퇴근"
+     │
+     ├─ D1: 퇴근 정정 승인
+     │   - sg_status = 승인
+     │   - sg_parent = R1
+     │   - sg_reason = "외근 후 퇴근"
+     │
+     │   └─ A1: 퇴근 (19:00) — 승인 확정 레코드
+     │        - sg_status = 정상
+     │        - sg_time = 19:00
+     │        - sg_parent = A0
+     │        - sg_reason = "외근 후 퇴근"
+     │
+     └─ D2: 퇴근 정정 반려
+         - sg_status = 반려
+         - sg_parent = R1
+         - sg_reason = "외근 후 퇴근"
+```
+
+### 4.5 승인/반려
 
 - 승인담당자만 처리 가능
 - 승인 시: 승인 레코드 생성 → 새 확정 출퇴근 레코드 생성
 - 반려 시: 반려 레코드 생성 (사유 필수)
-- 반려 후 재요청 가능 (횟수 제한 없음)
+- 반려 후 재신청 가능 (횟수 제한 없음)
 
-### 4.5 승인 체계
+### 4.6 승인 체계
 
 #### 조직 구조와 ShotGrid 필드 매핑
 
 | 직급 | ShotGrid 필드 | 설명 |
 |------|--------------|------|
-| 팀원 | `sg_part_supervisor` = 실장 | 실장이 정정 요청을 승인 |
-| 팀장 | `sg_part_supervisor` = 실장 | 실장이 정정 요청을 승인 |
-| 실장 | `sg_part_supervisor` = 비어있음 | 상위 승인자 없음 (직접 수정 가능) |
+| 팀원 | `sg_part_supervisor` = 실장 | 실장이 정정 신청을 승인 |
+| 팀장 | `sg_part_supervisor` = 실장 | 실장이 정정 신청을 승인 |
+| 실장 | `sg_part_supervisor` = 비어있음 | 기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)가 정정 신청을 승인 |
 
 #### 승인 권한 판별
 
-승인 대기 뱃지 표시 여부는 **사전 판별 없이** `Attendance.get_pending_corrections()`를 호출하여 결과가 있으면 표시한다. department와 무관하게, 요청자의 `sg_part_supervisor`에 등록된 사람만 승인할 수 있다.
+승인 대기 뱃지 표시 여부는 **사전 판별 없이** `Attendance.get_pending_corrections()`를 호출하여 결과가 있으면 표시한다. department와 무관하게, 요청자의 `sg_part_supervisor`에 등록된 사람이 승인할 수 있으며, `sg_part_supervisor`가 비어 있으면 기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)만 승인할 수 있다.
 
-#### 정정 요청 조회 범위 (누구의 정정을 볼 수 있는가)
+#### 정정 신청 조회 범위 (누구의 정정을 볼 수 있는가)
 
 `Attendance.get_pending_corrections(approver)` 메서드의 필터링 기준:
 
-1. `sg_status = '정정요청'`인 레코드 전체 조회
-2. **요청자의 `sg_part_supervisor`에 승인자가 포함**되고 **본인 건이 아닌 것**만 필터링
-3. 이미 승인/반려된 요청은 제외
+1. `sg_status = '정정신청'`인 레코드 전체 조회
+2. **요청자의 `sg_part_supervisor`가 있으면 그 첫 번째 값을 승인담당자로 사용**하고, 비어 있으면 **기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)를 승인담당자로 사용**한다.
+3. 계산된 승인담당자가 현재 승인자와 같고 **본인 건이 아닌 것**만 필터링한다.
+4. 이미 승인/반려된 요청은 제외
 
 ```python
-# 요청자의 sg_part_supervisor에 승인자가 포함된 것만 필터링
-supervisors = item.get('sg_user.HumanUser.sg_part_supervisor') or []
-if isinstance(supervisors, dict):
-    supervisors = [supervisors]
-for sup in supervisors:
-    if sup and sup.get('id') == approver_id:
-        filtered.append(item)
-        break
+# 요청자의 sg_part_supervisor를 우선 사용하고,
+# 비어 있으면 DEFAULT_CORRECTION_APPROVER를 사용한다.
+supervisors = item.get('sg_user.HumanUser.sg_part_supervisor')
+correction_approver = Attendance._get_correction_approver_from_supervisors(supervisors)
+if correction_approver and correction_approver.get('id') == approver_id:
+    filtered.append(item)
 ```
 
 #### 승인 흐름 요약
@@ -352,9 +388,9 @@ for sup in supervisors:
 |--------|--------|----------|
 | 팀원 | 요청자의 `sg_part_supervisor` | 요청자의 실장이 승인 |
 | 팀장 | 요청자의 `sg_part_supervisor` | 요청자의 실장이 승인 |
-| 실장 | 본인 (직접 수정 가능) | `sg_part_supervisor` 비어있음 → 정정 요청 없이 직접 시간 변경 |
+| 실장 | `DEFAULT_CORRECTION_APPROVER` | `sg_part_supervisor` 비어있음 → 기본 승인담당자가 승인 |
 
-### 4.6 불변성 규칙
+### 4.7 불변성 규칙
 
 - **모든 레코드는 생성 후 수정하지 않음**
 - 상태 변경은 새 레코드 생성으로 표현
@@ -366,16 +402,17 @@ for sup in supervisors:
 
 ### 5.1 필수 검증
 
-1. **하루 1개의 확정 출근**: 같은 `sg_user + sg_date`에 `sg_type=출근, sg_status=정상`은 최대 1개
-2. **하루 1개의 확정 퇴근**: 같은 `sg_user + sg_date`에 `sg_type=퇴근, sg_status=정상`은 최대 1개
-3. **요청 대상 존재**: `sg_status=정정요청`인 레코드는 `sg_parent`가 반드시 존재
-4. **승인/반려 대상 존재**: `sg_status=승인/반려`인 레코드는 `sg_parent`가 요청 레코드를 가리켜야 함
+1. **최초 정상 레코드 존재**: 출근/퇴근 정정 신청은 해당 타입의 원본 `정상` 레코드가 있어야 한다.
+2. **요청 대상 존재**: `sg_status=정정신청`인 레코드는 `sg_parent`가 반드시 존재한다.
+3. **승인/반려 대상 존재**: `sg_status=승인/반려`인 레코드는 `sg_parent`가 요청 레코드를 가리켜야 한다.
+4. **최종값은 최신 정상 레코드**: 같은 `sg_user + sg_date + sg_type` 조합에 `정상` 레코드가 여러 개 있을 수 있으며, 가장 나중에 생성된 `정상` 레코드를 최종 확정값으로 사용한다.
+5. **외근 후 퇴근 예외**: `sg_reason='외근 후 퇴근'`인 퇴근 정정 신청이 승인되면 최종 퇴근 시간은 항상 `19:00:00`이다.
 
 ### 5.2 검증 쿼리 예시
 
 ```python
-def validate_single_valid_attendance(sg_user, sg_date, sg_type):
-    """하루에 확정 출퇴근이 1개인지 검증한다."""
+def get_latest_confirmed_attendance(sg_user, sg_date, sg_type):
+    """최신 정상 출퇴근 레코드를 최종 확정값으로 사용한다."""
     records = sg.find(
         'CustomNonProjectEntity10',
         [
@@ -384,9 +421,10 @@ def validate_single_valid_attendance(sg_user, sg_date, sg_type):
             ['sg_type', 'is', sg_type],
             ['sg_status', 'is', '정상'],
         ],
-        ['id']
+        ['id', 'sg_time', 'created_at'],
+        order=[{'field_name': 'created_at', 'direction': 'desc'}],
     )
-    return len(records) <= 1
+    return records[0] if records else None
 ```
 
 ---
@@ -456,7 +494,7 @@ def validate_single_valid_attendance(sg_user, sg_date, sg_type):
 
 - **별도 엔티티**: 출퇴근 기록(`CustomNonProjectEntity10`)과 분리
 - **날짜별 개별 레코드**: 하루에 하나의 휴가 레코드 (반차도 동일)
-- **단순 기록**: 상태 변경(정정요청/승인/반려) 없음, 생성 후 수정/삭제 없음
+- **단순 기록**: 상태 변경(정정신청/승인/반려) 없음, 생성 후 수정/삭제 없음
 - **사유 필수**: 휴가 신청 시 사유 기록
 
 ### 7.2 엔티티 정보
@@ -672,7 +710,7 @@ def create_paid_leave_record(user, date, leave_type, source_unpaid_id):
 
 ### 8.6 유급휴가에 sg_status/sg_parent 미사용
 
-**문제**: 유급휴가도 출퇴근처럼 정정 요청/승인/반려가 필요한가?
+**문제**: 유급휴가도 출퇴근처럼 정정 신청/승인/반려가 필요한가?
 
 **결정**: **필드 제외** — `sg_status`, `sg_parent` 없음
 
