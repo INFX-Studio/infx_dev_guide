@@ -444,7 +444,541 @@ W:\1_Program\WindowsTerminal
 
 ---
 
-## 14. 마무리
+## 14. 편집기 단축키
+
+| 단축키 | 기능 |
+|--------|------|
+| `Ctrl+1~4` | 헤더 크기 조절 (H1~H4) |
+| `Ctrl+5` | 일반 단락 |
+| `Ctrl+6` | 블록인용 |
+| `Ctrl+7` | 코드 블록 |
+| `Ctrl+8` | 인라인 코드 |
+| `Ctrl+9` | 콜아웃 (반복 누르면 info → success → warning → danger 순환) |
+| `Ctrl+B` | 굵게 |
+| `Ctrl+I` | 기울임 |
+| `Ctrl+U` | 밑줄 |
+| `Ctrl+K` | 링크 삽입 |
+| `Ctrl+S` | 저장 |
+
+---
+
+## 15. WYSIWYG 편집기 HTML 지원
+
+### 15.1 허용되는 HTML 태그
+
+BookStack은 보안을 위해 HTML을 정제(sanitize)합니다. 다음 태그는 편집기에서 사용할 수 있습니다.
+
+| 카테고리 | 허용 태그 |
+|----------|----------|
+| 텍스트 포맷 | `<strong>`, `<b>`, `<em>`, `<i>`, `<u>`, `<s>`, `<del>`, `<sub>`, `<sup>` |
+| 제목 | `<h1>` ~ `<h6>` |
+| 목록 | `<ul>`, `<ol>`, `<li>` |
+| 테이블 | `<table>`, `<thead>`, `<tbody>`, `<tr>`, `<th>`, `<td>` |
+| 미디어/링크 | `<a>`, `<img>`, `<figure>`, `<figcaption>` |
+| 코드 | `<pre>`, `<code>` |
+| 레이아웃 | `<div>`, `<span>`, `<p>`, `<blockquote>`, `<hr>` |
+
+### 15.2 차단되는 HTML 태그
+
+보안상 다음 태그와 속성은 **차단**됩니다.
+
+- ❌ `<script>` — JavaScript 실행
+- ❌ `<style>` — 페이지 내 스타일 태그 (Custom HTML Head에서만 가능)
+- ❌ `<iframe>` — 외부 콘텐츠 삽입
+- ❌ `<object>`, `<embed>` — 플러그인 객체
+- ❌ `onclick`, `onload` 등 이벤트 핸들러 속성
+
+### 15.3 인라인 스타일은 허용
+
+`<style>` 태그는 차단되지만, **요소에 직접 `style` 속성을 넣는 것은 허용**됩니다.
+
+```html
+<!-- 허용됨 (O) -->
+<div style="background: #e3f2fd; padding: 12px; border-left: 4px solid #2196f3;">
+  강조할 내용
+</div>
+
+<!-- 차단됨 (X) -->
+<style>
+  .my-class { color: red; }
+</style>
+```
+
+### 15.4 커스텀 CSS 클래스 사용
+
+관리자가 **Custom HTML Head Content**에 CSS 클래스를 정의해두면, 페이지 본문에서 해당 클래스를 사용할 수 있습니다. WYSIWYG 편집기의 소스 코드 모드(</> 버튼)에서 직접 입력합니다.
+
+```html
+<!-- Custom HTML Head에 정의된 클래스를 페이지에서 사용 -->
+<div class="infx-card">카드 내용</div>
+<span class="infx-badge infx-badge-danger">중요</span>
+```
+
+---
+
+## 16. 관리자 커스터마이제이션
+
+BookStack의 시각적 커스터마이제이션은 **관리자 권한**이 필요합니다. 난이도별 3가지 방법이 있습니다.
+
+| 방법 | 난이도 | 위치 | 용도 |
+|------|--------|------|------|
+| Custom HTML Head Content | ⭐ 쉬움 | Settings > Customization | 전역 CSS/JS, 폰트 변경 |
+| Tag Classes | ⭐ 쉬움 | 페이지/책 태그 | 조건부 스타일 적용 |
+| Visual Theme System | ⭐⭐⭐ 어려움 | 서버 파일시스템 | 템플릿, 아이콘, 번역 오버라이드 |
+
+### 16.1 Custom HTML Head Content (권장)
+
+**위치**: Settings > Customization > Custom HTML Head Content
+
+모든 페이지의 `<head>`에 삽입되는 HTML입니다. 전역 CSS, 웹폰트, JavaScript를 추가할 수 있습니다.
+
+<p class="callout warning">설정(Settings) 페이지 자체에는 적용되지 않습니다. 이는 잘못된 CSS로 설정 페이지에 접근할 수 없게 되는 상황을 방지하기 위함입니다.</p>
+
+**예시 — 웹폰트 변경:**
+
+```html
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body {
+    --font-body: 'Noto Sans KR', sans-serif;
+    --font-heading: 'Noto Sans KR', sans-serif;
+    --font-code: 'Source Code Pro', monospace;
+  }
+</style>
+```
+
+<p class="callout info">BookStack은 CSS 변수를 지원합니다. <code>--font-body</code>, <code>--font-heading</code>, <code>--font-code</code>로 폰트를 전역 변경할 수 있습니다.</p>
+
+**예시 — inFX 커스텀 CSS 컴포넌트 등록:**
+
+```html
+<style>
+  /* === inFX BookStack 커스텀 컴포넌트 === */
+
+  /* 카드 */
+  .infx-card {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 16px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  }
+
+  .infx-card-header {
+    font-size: 18px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #4a90d9;
+  }
+
+  /* 배지 */
+  .infx-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 3px;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+
+  .infx-badge-primary { background: #4a90d9; color: white; }
+  .infx-badge-success { background: #27ae60; color: white; }
+  .infx-badge-warning { background: #f39c12; color: white; }
+  .infx-badge-danger  { background: #e74c3c; color: white; }
+  .infx-badge-default { background: #95a5a6; color: white; }
+</style>
+```
+
+### 16.2 Tag Classes (조건부 스타일)
+
+BookStack은 페이지/책/챕터에 부여한 태그를 CSS 클래스로 자동 변환하여 `<body>`에 적용합니다.
+
+**클래스 생성 규칙:**
+
+- 태그 이름: `tag-name-{name}`
+- 태그 값: `tag-value-{value}`
+- 이름+값 쌍: `tag-pair-{name}-{value}`
+- 텍스트는 소문자화, 공백/하이픈 제거
+
+**예시:**
+
+태그 `Priority: Critical`을 가진 페이지에 특별 스타일 적용:
+
+```html
+<!-- Custom HTML Head Content에 추가 -->
+<style>
+  .tag-pair-priority-critical .page-content {
+    border-left: 4px solid #e74c3c;
+  }
+</style>
+```
+
+### 16.3 Visual Theme System (고급)
+
+서버 파일시스템에 직접 접근하여 테마를 구성하는 방법입니다.
+
+**설정 방법:**
+
+1. BookStack 설치 경로에 `themes/{테마명}/` 폴더 생성
+2. `.env` 파일에 `APP_THEME={테마명}` 추가
+
+**폴더 구조:**
+
+```
+themes/infx/
+├── public/           # CSS, JS, 이미지 (/theme/infx/... URL로 접근)
+│   ├── css/
+│   │   └── custom.css
+│   └── images/
+│       └── logo.png
+├── common/           # Blade 템플릿 오버라이드
+│   └── custom-head.blade.php
+├── icons/            # SVG 아이콘 오버라이드
+└── lang/             # 번역 텍스트 오버라이드
+    └── ko/
+        └── common.php
+```
+
+<p class="callout warning">Blade 템플릿 오버라이드는 BookStack 업데이트 시 깨질 수 있습니다. 가능하면 Custom HTML Head Content 방식을 우선 사용하세요.</p>
+
+### 16.4 기본 UI 설정
+
+Settings > Customization에서 코드 없이 변경 가능한 항목:
+
+- 애플리케이션 이름
+- 로고 이미지
+- 핵심 색상 (Primary, Link, Page/Draft/Chapter/Book/Shelf 색상)
+- 기본 다크 모드 (`.env`에 `APP_DEFAULT_DARK_MODE=true`)
+
+---
+
+## 17. 고급 스타일링 패턴
+
+Custom HTML Head에 CSS를 등록해두면 페이지 본문에서 클래스로 사용할 수 있습니다. 아래는 inFX에서 권장하는 컴포넌트 패턴입니다.
+
+### 17.1 카드 (Card)
+
+**Custom HTML Head에 등록:**
+
+```html
+<style>
+  .infx-card {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 16px 0;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  }
+  .infx-card-header {
+    font-size: 18px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #4a90d9;
+  }
+  .infx-card-body { color: #555; line-height: 1.6; }
+  .infx-card-footer {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+    font-size: 12px;
+    color: #888;
+  }
+  .infx-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    margin: 20px 0;
+  }
+</style>
+```
+
+**페이지에서 사용:**
+
+```html
+<div class="infx-card">
+  <div class="infx-card-header">카드 제목</div>
+  <div class="infx-card-body">카드 본문 내용을 여기에 작성합니다.</div>
+  <div class="infx-card-footer">추가 정보</div>
+</div>
+
+<!-- 그리드 레이아웃 -->
+<div class="infx-card-grid">
+  <div class="infx-card">
+    <div class="infx-card-header">항목 1</div>
+    <div class="infx-card-body">설명...</div>
+  </div>
+  <div class="infx-card">
+    <div class="infx-card-header">항목 2</div>
+    <div class="infx-card-body">설명...</div>
+  </div>
+</div>
+```
+
+### 17.2 배지 (Badge)
+
+**Custom HTML Head에 등록:**
+
+```html
+<style>
+  .infx-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 3px;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+  .infx-badge-primary { background: #4a90d9; color: white; }
+  .infx-badge-success { background: #27ae60; color: white; }
+  .infx-badge-warning { background: #f39c12; color: white; }
+  .infx-badge-danger  { background: #e74c3c; color: white; }
+  .infx-badge-default { background: #95a5a6; color: white; }
+</style>
+```
+
+**페이지에서 사용:**
+
+```html
+<span class="infx-badge infx-badge-danger">필수</span>
+<span class="infx-badge infx-badge-success">완료</span>
+<span class="infx-badge infx-badge-warning">검토중</span>
+<span class="infx-badge infx-badge-default">선택</span>
+```
+
+### 17.3 타임라인 (Timeline)
+
+**Custom HTML Head에 등록:**
+
+```html
+<style>
+  .infx-timeline {
+    position: relative;
+    padding-left: 30px;
+    margin: 20px 0;
+  }
+  .infx-timeline::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #4a90d9;
+  }
+  .infx-timeline-item {
+    position: relative;
+    margin-bottom: 20px;
+  }
+  .infx-timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -24px;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    background: #4a90d9;
+    border-radius: 50%;
+    border: 2px solid white;
+  }
+  .infx-timeline-date {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 4px;
+  }
+  .infx-timeline-title {
+    font-weight: 600;
+    color: #2c3e50;
+  }
+</style>
+```
+
+**페이지에서 사용:**
+
+```html
+<div class="infx-timeline">
+  <div class="infx-timeline-item">
+    <div class="infx-timeline-date">2026-03-18</div>
+    <div class="infx-timeline-title">Flova 2.0 릴리스</div>
+    <p>새로운 UI 프레임워크 적용 완료</p>
+  </div>
+  <div class="infx-timeline-item">
+    <div class="infx-timeline-date">2026-03-10</div>
+    <div class="infx-timeline-title">QA 테스트 완료</div>
+    <p>모든 DCC 통합 테스트 통과</p>
+  </div>
+</div>
+```
+
+### 17.4 스텝 프로세스 (Steps)
+
+**Custom HTML Head에 등록:**
+
+```html
+<style>
+  .infx-steps {
+    display: flex;
+    gap: 16px;
+    margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .infx-step {
+    flex: 1;
+    min-width: 120px;
+    text-align: center;
+    padding: 16px;
+    background: #f8f9fa;
+    border-radius: 8px;
+  }
+  .infx-step-number {
+    display: inline-block;
+    width: 32px;
+    height: 32px;
+    line-height: 32px;
+    background: #4a90d9;
+    color: white;
+    border-radius: 50%;
+    font-weight: bold;
+    margin-bottom: 8px;
+  }
+  .infx-step-title {
+    font-weight: 600;
+    font-size: 14px;
+  }
+</style>
+```
+
+**페이지에서 사용:**
+
+```html
+<div class="infx-steps">
+  <div class="infx-step">
+    <div class="infx-step-number">1</div>
+    <div class="infx-step-title">모델링</div>
+  </div>
+  <div class="infx-step">
+    <div class="infx-step-number">2</div>
+    <div class="infx-step-title">리깅</div>
+  </div>
+  <div class="infx-step">
+    <div class="infx-step-number">3</div>
+    <div class="infx-step-title">애니메이션</div>
+  </div>
+  <div class="infx-step">
+    <div class="infx-step-number">4</div>
+    <div class="infx-step-title">렌더링</div>
+  </div>
+</div>
+```
+
+### 17.5 컬러 헤더 (Colored Header)
+
+**Custom HTML Head에 등록:**
+
+```html
+<style>
+  .infx-header-blue {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+  }
+  .infx-header-blue h3,
+  .infx-header-blue h4 { color: white; margin: 0; }
+
+  .infx-header-dark {
+    background: #2c3e50;
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+  }
+  .infx-header-dark h3,
+  .infx-header-dark h4 { color: white; margin: 0; }
+</style>
+```
+
+**페이지에서 사용:**
+
+```html
+<div class="infx-header-blue">
+  <h4>프로젝트 개요</h4>
+  <p>이 섹션은 프로젝트의 전체 구조를 설명합니다.</p>
+</div>
+```
+
+### 17.6 인라인 스타일 패턴 (CSS 등록 없이)
+
+Custom HTML Head에 클래스를 등록하지 않고도, 인라인 스타일만으로 사용할 수 있는 패턴입니다.
+
+**정보 박스:**
+
+```html
+<div style="background: #e3f2fd; border-left: 4px solid #2196f3; padding: 12px 16px; margin: 12px 0; border-radius: 4px;">
+  <strong>ℹ️ 참고</strong>
+  <p style="margin: 8px 0 0 0;">알려드릴 내용을 여기에 작성합니다.</p>
+</div>
+```
+
+**경고 박스:**
+
+```html
+<div style="background: #fff3e0; border-left: 4px solid #ff9800; padding: 12px 16px; margin: 12px 0; border-radius: 4px;">
+  <strong>⚠️ 주의</strong>
+  <p style="margin: 8px 0 0 0;">주의가 필요한 내용을 여기에 작성합니다.</p>
+</div>
+```
+
+**2단 레이아웃 (테이블 기반):**
+
+```html
+<table style="width: 100%; border-collapse: collapse; border: none;">
+  <tr>
+    <td style="width: 50%; vertical-align: top; padding: 8px; border: none;">
+      <p>왼쪽 열 내용</p>
+    </td>
+    <td style="width: 50%; vertical-align: top; padding: 8px; border: none;">
+      <p>오른쪽 열 내용</p>
+    </td>
+  </tr>
+</table>
+```
+
+**캡션 있는 이미지:**
+
+```html
+<figure style="margin: 16px 0; text-align: center;">
+  <img src="이미지_URL" alt="설명" style="max-width: 100%; height: auto; border-radius: 4px;">
+  <figcaption style="color: #666; font-size: 14px; margin-top: 8px;">이미지 설명</figcaption>
+</figure>
+```
+
+---
+
+## 18. 유용한 Hacks
+
+BookStack 공식 [Hacks 디렉토리](https://www.bookstackapp.com/hacks/)에서 제공하는 확장 기능입니다. Custom HTML Head Content에 추가하여 사용합니다.
+
+| Hack | 용도 | 링크 |
+|------|------|------|
+| Mermaid Diagrams | 플로차트, 시퀀스 다이어그램 렌더링 | [보기](https://www.bookstackapp.com/hacks/mermaid-viewer/) |
+| MathJax / LaTeX | 수학 수식 렌더링 | [보기](https://www.bookstackapp.com/hacks/mathjax-tex/) |
+| WYSIWYG Autocompleter | 에디터 자동완성 기능 | [보기](https://www.bookstackapp.com/hacks/wysiwyg-autocompleter/) |
+| Footnotes | 각주 기능 | [보기](https://www.bookstackapp.com/hacks/wysiwyg-footnotes/) |
+
+<p class="callout info">Hacks는 Custom HTML Head Content에 <code>&lt;script&gt;</code>를 추가하는 방식이므로, 관리자 권한이 필요합니다. 페이지 본문의 <code>&lt;script&gt;</code>와는 다릅니다.</p>
+
+---
+
+## 19. 마무리
 
 **핵심 원칙:**
 
@@ -453,3 +987,11 @@ W:\1_Program\WindowsTerminal
 3. `---`로 섹션 구분
 4. Callout으로 중요 정보 강조
 5. 간결하고 명확하게
+
+**스타일링 원칙:**
+
+6. 반복 사용하는 스타일은 Custom HTML Head에 CSS 클래스로 등록
+7. 일회성 스타일은 인라인 `style` 속성 사용
+8. 모든 커스텀 클래스에 `infx-` 접두사를 붙여 충돌 방지
+9. 페이지 본문에 `<style>`, `<script>` 태그 사용 금지 (차단됨)
+10. 다크 모드 호환을 고려하여 하드코딩 색상보다 CSS 변수 우선 사용
