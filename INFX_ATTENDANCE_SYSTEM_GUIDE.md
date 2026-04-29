@@ -40,7 +40,8 @@
 | 필드명 | Display Name | 타입 | 필수 | 설명 |
 |--------|--------------|------|------|------|
 | `code` | Code | text | O | `{이름}_{YYYYMMDD}_{type}_{status}_{HHMMSS}` |
-| `sg_user` | 사용자 | entity(HumanUser) | O | 레코드 종류별 의미 다름 (아래 표 참고) |
+| `sg_user` | 사용자 | entity(HumanUser) | O | 출퇴근 대상자 또는 신청자 |
+| `sg_approver` | 승인담당자 | entity(HumanUser) | - | 승인해야 할 담당자 또는 실제 처리자 |
 | `sg_date` | 근무일 | date | O | 출퇴근 날짜 |
 | `sg_type` | 구분 | list | O | `출근`, `퇴근` |
 | `sg_status` | 상태 | list | - | `정상`, `정정신청`, `승인`, `반려` |
@@ -56,13 +57,14 @@
 | 정정신청 (sg_status='정정신청') | 정정 희망 시간 |
 | 승인/반려 | null (의미 없음) |
 
-### 2.5 sg_user 필드 용도
+### 2.5 sg_user / sg_approver 필드 용도
 
-| 레코드 종류 | sg_user 의미 |
-|---------------|----------------|
-| 확정 출퇴근 | 대상 직원 (본인) |
-| 정정 신청 | 대상 직원 (본인) |
-| 승인/반려 | 처리자 (팀장) |
+| 레코드 종류 | sg_user 의미 | sg_approver 의미 |
+|---------------|----------------|----------------|
+| 확정 출퇴근 | 대상 직원 (본인) | 없음 |
+| 정정 신청 | 대상 직원 (본인) | 승인담당자 |
+| 승인/반려 | 대상 직원 (본인) | 실제 처리자 |
+| 석식/석식포기 | 대상 직원 (본인) | 없음 |
 ### 2.6 시스템 필드 활용
 
 | 필드명 | 용도 |
@@ -143,7 +145,8 @@ A0: 출근 (09:30)
      └─ D1: 출근 정정 승인
          │  - sg_status = 승인
          │  - sg_parent = R1
-         │  - sg_user = 팀장
+         │  - sg_user = 신청자
+         │  - sg_approver = 팀장
          │
          └─ A1: 출근 (08:00) — 새 확정 레코드
               - sg_status = 정상
@@ -163,6 +166,8 @@ A0: 출근 (09:30)
  │   └─ D1: 출근 정정 반려
  │        - sg_status = 반려
  │        - sg_parent = R1
+ │        - sg_user = 신청자
+ │        - sg_approver = 팀장
  │        - sg_reason = "증빙 부족"
  │
 └─ R2: 출근 정정 신청 (08:30) — 재신청
@@ -349,6 +354,7 @@ A0: 퇴근 (17:03) — 실제 버튼 클릭 시각
 - 승인 시: 승인 레코드 생성 → 새 확정 출퇴근 레코드 생성
 - 반려 시: 반려 레코드 생성 (사유 필수)
 - 반려 후 재신청 가능 (횟수 제한 없음)
+- 승인/반려 레코드의 `sg_user`는 신청자로 유지하고, 처리자는 `sg_approver`에 기록한다.
 
 ### 4.6 승인 체계
 
@@ -369,15 +375,17 @@ A0: 퇴근 (17:03) — 실제 버튼 클릭 시각
 `Attendance.get_pending_corrections(approver)` 메서드의 필터링 기준:
 
 1. `sg_status = '정정신청'`인 레코드 전체 조회
-2. **요청자의 `sg_part_supervisor`가 있으면 그 첫 번째 값을 승인담당자로 사용**하고, 비어 있으면 **기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)를 승인담당자로 사용**한다.
-3. 계산된 승인담당자가 현재 승인자와 같고 **본인 건이 아닌 것**만 필터링한다.
-4. 이미 승인/반려된 요청은 제외
+2. `sg_approver`가 있으면 해당 값을 승인담당자로 사용한다.
+3. `sg_approver`가 비어 있는 기존 레코드는 **요청자의 `sg_part_supervisor`가 있으면 그 첫 번째 값**을 사용하고, 비어 있으면 **기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)를 승인담당자로 사용**한다.
+4. 계산된 승인담당자가 현재 승인자와 같고 **본인 건이 아닌 것**만 필터링한다.
+5. 이미 승인/반려된 요청은 제외
 
 ```python
-# 요청자의 sg_part_supervisor를 우선 사용하고,
-# 비어 있으면 DEFAULT_CORRECTION_APPROVER를 사용한다.
-supervisors = item.get('sg_user.HumanUser.sg_part_supervisor')
-correction_approver = Attendance._get_correction_approver_from_supervisors(supervisors)
+# sg_approver를 우선 사용하고, 기존 레코드는 요청자의 sg_part_supervisor를 fallback으로 사용한다.
+correction_approver = item.get('sg_approver')
+if not correction_approver:
+    supervisors = item.get('sg_user.HumanUser.sg_part_supervisor')
+    correction_approver = Attendance._get_correction_approver_from_supervisors(supervisors)
 if correction_approver and correction_approver.get('id') == approver_id:
     filtered.append(item)
 ```
@@ -455,18 +463,17 @@ def get_latest_confirmed_attendance(sg_user, sg_date, sg_type):
 - 데이터 위변조 불가능
 - 디버깅 및 문제 추적 용이
 
-### 6.3 sg_user 필드 통합 (sg_approved_by 제거)
+### 6.3 sg_user / sg_approver 필드 분리
 
 **문제**: 대상 직원과 승인자를 별도 필드로 관리할 것인가?
 
-**결정**: `sg_user` 하나로 통합, `sg_approved_by` 제거
+**결정**: `sg_user`는 대상 직원/신청자로 고정하고, 승인담당자 또는 실제 처리자는 `sg_approver`에 기록
 
 **이유**:
-- 하나의 레코드는 하나의 성질만 기록함
-- 확정/요청 레코드: `sg_user` = 대상 직원
-- 승인/반려 레코드: `sg_user` = 처리자
-- 대상 직원은 `sg_parent` 체인을 따라가면 확인 가능
-- 필드 수 최소화로 스키마 단순화
+- ShotGrid 화면에서 신청자와 승인담당자를 즉시 구분할 수 있음
+- 확정/요청/승인/반려 레코드 모두 `sg_user`를 대상 직원 기준으로 조회할 수 있음
+- 승인 대기, 승인, 반려, 취소 처리자는 `sg_approver`로 일관되게 추적 가능
+- 기존 `sg_parent` 체인은 이벤트 관계 추적에만 집중할 수 있음
 
 ### 6.4 sg_parent 필드명 선택
 
