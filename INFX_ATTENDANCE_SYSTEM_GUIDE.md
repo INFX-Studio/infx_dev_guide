@@ -73,6 +73,29 @@
 | 필드명 | 용도 |
 |--------|------|
 | `created_at` | 레코드 생성 시점 |
+
+### 2.7 Attendance Rule 엔티티
+
+사용자별 기준 출근/퇴근 시간이 기본 규칙과 다른 경우 `Attendance Rule`에 기간형 규칙으로 기록한다.
+
+| 항목 | 값 |
+|------|-----|
+| Entity Type | CustomNonProjectEntity14 |
+| Display Name | Attendance Rule |
+
+| 필드명 | Display Name | 타입 | 필수 | 설명 |
+|--------|--------------|------|------|------|
+| `code` | Attendance Rule Name | text | O | 규칙 식별 이름 |
+| `sg_user` | User | entity(HumanUser) | O | 규칙 적용 대상 사용자 |
+| `sg_effective_from` | Effective From | date | O | 규칙 적용 시작일 |
+| `sg_effective_to` | Effective To | date | - | 규칙 적용 종료일. 비어 있으면 무기한 시행 |
+| `sg_start_time` | Start Time | text | O | 기준 출근시간. `HH:MM` 형식 |
+| `sg_end_time` | End Time | text | O | 기준 퇴근시간. `HH:MM` 형식 |
+| `sg_reason` | Reason | text | - | 규칙 적용 사유 |
+
+적용 기준은 `sg_user + 근무일`이다. `sg_effective_from <= 근무일`이고, `sg_effective_to`가 비어 있거나 `근무일 <= sg_effective_to`인 규칙을 유효한 규칙으로 본다. 같은 사용자에게 같은 날짜 범위가 겹치는 규칙은 생성하지 않는다.
+
+`SGAttendanceRuleCache`는 `flova.shotgrid.cache`에 정의하며 Redis key `sg:attendance_rule`에 전체 규칙을 저장한다. `sg_event_framework`의 `create_sg_attendance_rule_cache` 플러그인은 `CustomNonProjectEntity14` 생성/수정/삭제/복구 이벤트가 발생하면 cache를 갱신한다.
 | `created_by` | 레코드 생성자 |
 
 ### 2.7 List 필드 값
@@ -276,8 +299,10 @@ def get_attendance_status(original_attendance):
 
 #### 정식 업무 시작 시간
 
-- 정식 업무 시작 시간: **오전 10시 (10:00:00)**
-- 의무 근무시간: **9시간** (8시간 근무 + 1시간 점심)
+- 기본 정식 업무 시작 시간: **오전 10시 (10:00:00)**
+- 기본 정식 퇴근 시간: **오후 7시 (19:00:00)**
+- 기본 의무 근무시간: **9시간** (8시간 근무 + 1시간 점심)
+- 사용자/날짜에 유효한 `Attendance Rule`이 있으면 기본 출근/퇴근 시간 대신 `sg_start_time`, `sg_end_time`을 적용한다.
 
 #### 유효 출근 시간 (Effective Start)
 
@@ -285,6 +310,12 @@ def get_attendance_status(original_attendance):
 
 ```
 effective_start = max(출근시간, 10:00:00)
+```
+
+Attendance Rule이 있는 경우:
+
+```python
+effective_start = max(출근시간, rule.sg_start_time)
 ```
 
 | 출근 시간 | 유효 출근 시간 (effective_start) | 설명 |
@@ -302,6 +333,8 @@ effective_start = max(출근시간, 10:00:00)
 ```
 야근 시작 = effective_start + 9시간
 ```
+
+기본 규칙에서는 위 식이 `19:00 + 지각시간`과 같다. Attendance Rule이 있는 경우 야근 시작/정상 퇴근 기준은 `rule.sg_end_time + 지각시간`으로 계산한다.
 
 | 출근 시간 | effective_start | 야근 시작 | 설명 |
 |-----------|----------------|-----------|------|
@@ -329,6 +362,8 @@ regular_minutes = min(work_minutes, 480분)       # 정규 근무시간 (최대 
 overtime_minutes = max(0, work_minutes - 480분)  # 야근시간
 ```
 
+Attendance Rule이 있는 사용자는 지각, 조퇴, 야근 시작, 하루 정상근무 확인 모두 규칙의 기준 출근/퇴근 시간을 사용한다. 예를 들어 `09:30~16:30` 규칙이 적용된 사용자는 `09:30` 이후 출근부터 지각으로 보고, `16:30` 이전 퇴근을 조퇴/근무시간 미달로 본다. 일반 사용자는 기존처럼 점심시간 포함 9시간 근무 여부를 기준으로 하루 정상근무를 판단한다.
+
 #### 비근로일 근무시간 계산
 
 토요일, 일요일, 공휴일은 비근로일로 취급한다. 비근로일에는 정식 업무 시작 시간, 지각, 의무 근무시간, 야근 시작 시간, 야근 인정 시간을 적용하지 않는다.
@@ -354,7 +389,7 @@ can_claim_lunch_cost = work_minutes >= 480분
 
 #### 조기 퇴근 확인 다이얼로그
 
-퇴근 버튼 클릭 시 의무 근무시간(9시간) 충족 여부에 따라 동작이 달라진다.
+퇴근 버튼 클릭 시 기준 퇴근 시간 충족 여부에 따라 동작이 달라진다. 기본 규칙은 의무 근무시간(9시간)이며, Attendance Rule이 있으면 규칙의 `End Time + 지각시간`을 기준으로 한다.
 
 | 조건 | 동작 |
 |------|------|
