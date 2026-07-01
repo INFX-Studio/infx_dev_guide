@@ -51,7 +51,7 @@
 |--------|--------------|------|------|------|
 | `code` | Code | text | O | `{이름}_{YYYYMMDD}_{type}_{status}_{HHMMSS}` |
 | `sg_user` | 사용자 | entity(HumanUser) | O | 출퇴근 대상자 또는 신청자 |
-| `sg_approver` | 승인담당자 | entity(HumanUser) | - | 승인해야 할 담당자 또는 실제 처리자 |
+| `sg_approver` | 승인담당자 | entity(HumanUser) | - | 승인해야 할 담당자 또는 실제 처리자. 승인담당자가 없는 자동 확정 레코드는 비워 둔다. |
 | `sg_date` | 근무일 | date | O | 출퇴근 날짜 |
 | `sg_type` | 구분 | list | O | `출근`, `퇴근`, `석식`, `중식`, `야근`, `외근` |
 | `sg_status` | 상태 | list | - | `정상`, `신청`, `정정신청`, `승인`, `확정`, `반려`, `포기`, `취소` |
@@ -77,9 +77,9 @@
 | 레코드 종류 | sg_user 의미 | sg_approver 의미 |
 |---------------|----------------|----------------|
 | 확정 출퇴근 | 대상 직원 (본인) | 없음 |
-| 정정 신청 | 대상 직원 (본인) | 승인담당자 |
-| 승인/반려 | 대상 직원 (본인) | 실제 처리자 |
-| 외근 신청 | 대상 직원 (본인) | 승인담당자 |
+| 정정 신청 | 대상 직원 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
+| 승인/반려 | 대상 직원 (본인) | 실제 처리자. 승인담당자 부재 자동 승인/확정은 없음 |
+| 외근 신청 | 대상 직원 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
 | 석식/중식 포기 | 대상 직원 (본인) | 없음 |
 ### 2.6 시스템 필드 활용
 
@@ -250,6 +250,7 @@
 - 저장 시 실제 클릭 시각으로 `출근 / 정상`을 먼저 생성하고, 해당 출근 레코드를 parent로 하는 `외근 / 신청`을 생성합니다.
 - `외근 / 신청.sg_time`은 외근 시작 인정 시각입니다. 기본 규칙에서는 당일 `10:00:00`입니다.
 - 승인담당자가 승인하면 `외근 / 승인`과 `외근 / 확정`을 생성합니다.
+- 요청자의 `sg_part_supervisor`가 비어 있어 승인담당자가 없으면 `외근 / 신청` 생성 직후 `외근 / 승인`과 `외근 / 확정`을 자동 생성합니다. 이때 `sg_approver`는 비워 둡니다.
 - 승인 후에는 `외근 / 확정.sg_time`부터 실제 출근시간까지를 외근 구간으로 인정합니다.
 
 ```
@@ -286,6 +287,7 @@ A0: 출근 (13:00)
 - 저장 시 실제 클릭 시각으로 `퇴근 / 정상`을 먼저 생성하고, 해당 퇴근 레코드를 parent로 하는 `외근 / 신청`을 생성합니다.
 - `외근 / 신청.sg_time`은 외근 종료 인정 시각입니다. 실제 출근, 휴가, 점심 제외 기준으로 정상근무 8시간을 충족하는 시각을 기록합니다.
 - 승인담당자가 승인하면 `외근 / 승인`과 `외근 / 확정`을 생성합니다.
+- 요청자의 `sg_part_supervisor`가 비어 있어 승인담당자가 없으면 `외근 / 신청` 생성 직후 `외근 / 승인`과 `외근 / 확정`을 자동 생성합니다. 이때 `sg_approver`는 비워 둡니다.
 - 승인 후에도 최종 퇴근시간 표시는 실제 퇴근 체크 시각을 유지합니다. 그래프에는 실제 퇴근시간부터 외근 종료 인정 시각까지 별도 외근 세그먼트를 붙입니다.
 
 ```
@@ -312,6 +314,8 @@ A0: 퇴근 (16:00)
         - sg_time = 19:00
         - sg_parent = R1
 ```
+
+승인담당자가 없는 자동 확정도 위와 같은 `신청 → 승인 → 확정` 레코드 구조를 유지합니다. 차이는 자동 생성된 `승인`과 `확정` 레코드의 `sg_approver`를 비워 둔다는 점입니다.
 
 ##### 외근 그래프 표시
 
@@ -343,6 +347,8 @@ A0: 출근 (09:30)
               - sg_time = 08:00
               - sg_parent = A0
 ```
+
+요청자의 `sg_part_supervisor`가 비어 있으면 출근 정정 신청 생성 직후 `출근 / 승인`과 `출근 / 확정`을 자동 생성합니다. 자동 생성된 승인/확정 레코드의 `sg_approver`는 비워 둡니다. `sg_part_supervisor` 조회 실패는 승인담당자 없음으로 보지 않으며, 자동 확정을 수행하지 않습니다.
 
 ### 3.3 출근 정정 신청 → 반려 → 재신청 → 승인/포기
 
@@ -593,6 +599,7 @@ can_claim_lunch_cost = work_minutes >= 480분
 - `출근 / 정정신청` 요청 레코드 생성
 - 퇴근은 정정신청을 사용하지 않고 `정상`과 `취소`만 사용한다.
 - 외근 후 출근/퇴근은 정정신청을 사용하지 않고 `외근 / 신청` 워크플로우를 사용한다.
+- 요청자의 `sg_part_supervisor`가 비어 있으면 출근 정정 신청은 생성 직후 자동 승인/확정된다.
 
 ### 4.4 퇴근 취소
 
@@ -613,7 +620,8 @@ A0: 퇴근 (17:03)
 
 ### 4.5 출근 정정 승인/반려/포기
 
-- 승인담당자만 처리 가능
+- 승인담당자가 있는 신청은 해당 승인담당자만 처리 가능
+- 승인담당자가 없는 신청은 생성 직후 `출근 / 승인`과 `출근 / 확정`을 자동 생성한다.
 - 승인 시: `출근 / 승인` 레코드 생성 → `출근 / 확정` 레코드 생성
 - 반려 시: 반려 레코드 생성 (사유 필수)
 - 반려 후 재신청 가능 (횟수 제한 없음)
@@ -650,6 +658,8 @@ A0: 퇴근 (17:03)
 2. 승인담당자가 승인하면 `야근 / 승인` 레코드를 생성한다.
 3. 같은 요청에 대해 `야근 / 확정` 레코드를 추가 생성한다.
 4. UI/API 상태는 기존 호환성을 위해 `확정`을 `approved` 상태로 취급한다.
+
+요청자의 `sg_part_supervisor`가 비어 있으면 `야근 / 신청` 생성 직후 `야근 / 승인`과 `야근 / 확정`을 자동 생성합니다. 자동 생성된 승인/확정 레코드의 `sg_approver`는 비워 둡니다. `sg_part_supervisor` 조회 실패는 자동 확정 조건이 아닙니다.
 
 ```
 R1: 야근 신청
@@ -706,11 +716,15 @@ R1: 야근 신청
 |------|--------------|------|
 | 팀원 | `sg_part_supervisor` = 실장 | 실장이 출근 정정 또는 야근 신청을 승인 |
 | 팀장 | `sg_part_supervisor` = 실장 | 실장이 출근 정정 또는 야근 신청을 승인 |
-| 실장 | `sg_part_supervisor` = 비어있음 | 기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)가 출근 정정 또는 야근 신청을 승인 |
+| 실장 또는 supervisor 미지정자 | `sg_part_supervisor` = 비어있음 | 승인담당자 부재로 신청 직후 자동 승인/확정 |
 
 #### 승인 권한 판별
 
-출근 정정 승인 대기 뱃지 표시 여부는 **사전 판별 없이** `Attendance.get_pending_corrections()`를 호출하여 결과가 있으면 표시한다. 야근 승인 대기는 `Attendance.get_pending_overtime_requests()`로 별도 조회한다. department와 무관하게, 요청자의 `sg_part_supervisor`에 등록된 사람이 승인할 수 있으며, `sg_part_supervisor`가 비어 있으면 기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)만 승인할 수 있다.
+출근 정정 승인 대기 뱃지 표시 여부는 **사전 판별 없이** `Attendance.get_pending_corrections()`를 호출하여 결과가 있으면 표시합니다. 야근 승인 대기는 `Attendance.get_pending_overtime_requests()`로 별도 조회합니다.
+
+department와 무관하게 요청자의 `sg_part_supervisor`에 등록된 첫 번째 HumanUser만 승인담당자로 사용합니다. `sg_part_supervisor`가 실제로 비어 있으면 승인담당자가 없는 정상 상태로 보고, 출근 정정, 연속근무, 야근, 외근 신청은 생성 직후 `승인`과 `확정` 레코드를 자동 생성합니다. 이때 신청, 승인, 확정 레코드의 `sg_approver`는 비워 둡니다.
+
+`sg_part_supervisor` 조회 실패, Redis cache 미생성, ShotGrid 조회 실패, `HumanUser` 레코드의 필드 누락은 승인담당자 없음으로 취급하지 않습니다. 이 경우 자동 확정을 수행하지 않고 오류로 처리해야 합니다.
 
 #### 출근 정정 신청 조회 범위 (누구의 정정을 볼 수 있는가)
 
@@ -718,12 +732,13 @@ R1: 야근 신청
 
 1. `sg_type = '출근'`, `sg_status = '정정신청'`인 레코드 전체 조회
 2. `sg_approver`가 있으면 해당 값을 승인담당자로 사용한다.
-3. `sg_approver`가 비어 있는 기존 레코드는 **요청자의 `sg_part_supervisor`가 있으면 그 첫 번째 값**을 사용하고, 비어 있으면 **기본 승인담당자(`DEFAULT_CORRECTION_APPROVER`)를 승인담당자로 사용**한다.
-4. 계산된 승인담당자가 현재 승인자와 같고 **본인 건이 아닌 것**만 필터링한다.
-5. 이미 승인/반려/포기된 요청은 제외
+3. `sg_approver`가 비어 있는 기존 레코드는 **요청자의 `sg_part_supervisor`가 있으면 그 첫 번째 값**을 승인담당자로 사용한다.
+4. `sg_part_supervisor`가 비어 있는 요청은 승인담당자 대기 목록에 넣지 않는다.
+5. 계산된 승인담당자가 현재 승인자와 같고 **본인 건이 아닌 것**만 필터링한다.
+6. 이미 승인/반려/포기된 요청은 제외
 
 ```python
-# sg_approver를 우선 사용하고, 기존 레코드는 요청자의 sg_part_supervisor를 fallback으로 사용한다.
+# sg_approver를 우선 사용하고, 없으면 요청자의 sg_part_supervisor만 사용한다.
 correction_approver = item.get('sg_approver')
 if not correction_approver:
     supervisors = item.get('sg_user.HumanUser.sg_part_supervisor')
@@ -738,7 +753,7 @@ if correction_approver and correction_approver.get('id') == approver_id:
 |--------|--------|----------|
 | 팀원 | 요청자의 `sg_part_supervisor` | 요청자의 실장이 승인 |
 | 팀장 | 요청자의 `sg_part_supervisor` | 요청자의 실장이 승인 |
-| 실장 | `DEFAULT_CORRECTION_APPROVER` | `sg_part_supervisor` 비어있음 → 기본 승인담당자가 승인 |
+| 실장 또는 supervisor 미지정자 | 없음 | `sg_part_supervisor` 비어있음 → 신청 직후 자동 승인/확정 |
 
 ### 4.9 불변성 규칙
 
@@ -802,6 +817,39 @@ def get_latest_confirmed_attendance(sg_user, sg_date, sg_type):
     )
     return records[0] if records else None
 ```
+
+### 5.4 승인담당자 미지정 기존 신청 보정
+
+과거 default approver fallback으로 승인 대기 상태가 된 신청은 운영 데이터 직접 수정 대신 새 `승인` 및 `확정` 레코드를 추가하여 보정합니다. 기존 신청 레코드는 수정하지 않습니다.
+
+보정 대상 조건:
+
+1. 요청자의 현재 `sg_part_supervisor`가 비어 있습니다.
+2. 신청의 `sg_approver`가 비어 있거나 legacy default approver id `4644`입니다.
+3. 신청 유형은 `출근 / 정정신청`, `야근 / 신청`, `외근 / 신청`입니다.
+4. 해당 신청을 parent로 하는 `승인`, `확정`, `반려`, `포기`, `취소` 레코드가 없어야 합니다.
+5. 실제 `sg_part_supervisor`가 id `4644`인 사용자의 신청은 보정 대상이 아닙니다.
+
+명령은 기본 dry-run이며 운영 데이터를 변경하지 않습니다.
+
+```bash
+cd C:/dev/infx/project_timelog_web/backend
+python manage.py repair_no_approver_attendance_requests
+```
+
+특정 신청만 점검하려면 `--request-id`를 사용합니다.
+
+```bash
+python manage.py repair_no_approver_attendance_requests --request-id 6966
+```
+
+실제 적용은 dry-run 결과를 검토하고 별도 승인 후에만 `--apply`로 실행합니다.
+
+```bash
+python manage.py repair_no_approver_attendance_requests --request-id 6966 --apply
+```
+
+적용 후에는 출퇴근 Redis cache를 해당 날짜 범위 또는 전체 승인 source 기준으로 refresh해야 합니다. 운영 환경에서는 적용 전 dry-run 출력, 적용 대상 id, 생성된 `승인`/`확정` id, cache refresh 결과를 작업 로그에 남깁니다.
 
 ---
 
