@@ -418,13 +418,15 @@ R1: 출근 정정 신청
 ```python
 def get_attendance_status(original_attendance):
     """출퇴근 레코드의 현재 상태를 반환한다."""
-    # 관련 레코드 조회 (최신순)
-    related = sg.find(
-        'CustomNonProjectEntity10',
-        [['sg_parent', 'is', original_attendance]],
-        ['sg_status', 'sg_type', 'created_at'],
-        order=[{'field_name': 'created_at', 'direction': 'desc'}]
+    summary = AttendanceQueryService().get_user_day(
+        original_attendance['sg_user']['id'],
+        original_attendance['sg_date'],
     )
+    related = [
+        record for record in summary['attendance_records']
+        if (record.get('sg_parent') or {}).get('id') == original_attendance['id']
+    ]
+    related.sort(key=lambda record: str(record.get('created_at') or ''), reverse=True)
     
     if not related:
         return '정상'  # 정정 신청 없음
@@ -619,24 +621,27 @@ can_claim_lunch_cost = work_minutes >= 480분
 - 일반 출근 정정 신청의 사유는 연속근무 인정 전용 문구인 `연속근무로 인한 정상출근 인정`으로 시작할 수 없다. 서버는 해당 입력을 거부하여 월 횟수 제한 우회를 방지한다.
 - 반려 후 재신청은 가능하며, 재신청도 승인된 경우에만 월 신청 횟수에 포함한다.
 - 같은 근무일의 일반 출근 정정신청이 한 번 승인되면 해당 근무일에는 더 이상 출근 정정신청을 생성할 수 없다. 승인 대기, 반려, 포기 상태만 있는 근무일은 이 제한으로 막지 않는다.
-- 승인 quota를 확정하는 Redis Lua에서 `sg_user + sg_date` 기준 승인 marker도 같은 원자 연산으로 확정한다. 새 신청 직전에는 ShotGrid 승인 레코드와 이 marker를 함께 확인하여 ShotGrid read-after-write 지연 중에도 승인된 근무일의 재신청을 막는다.
+- 출퇴근 runtime 조회는 Redis partition cache와 Redis marker만 사용한다. cache miss, cache payload 오류 또는 아직 반영되지 않은 write는 오류로 처리하며 ShotGrid `find()`, `find_one()` 또는 partition 즉시 rebuild로 fallback하지 않는다.
+- 승인 quota를 확정하는 Redis Lua에서 `sg_user + sg_date` 기준 승인 marker도 같은 원자 연산으로 확정한다. 새 신청 직전에는 Redis partition cache와 이 marker를 함께 확인하여 cache 반영 지연 중에도 승인된 근무일의 재신청을 막는다.
 - 출근 시간 클릭과 정정 신청 다이얼로그 열기는 월 사용 횟수와 관계없이 항상 허용한다. 기존의 비근로일, 출근 기록 없음, 처리 중인 정정 신청 존재 등 횟수 이외의 신청 불가 조건은 그대로 적용한다.
 - 월 3회를 소진하지 않은 경우 다이얼로그에 이번 신청이 승인되면 몇 번째인지와 승인 후 남는 횟수를 표시한다. 예: `이번 신청이 승인되면 2번째입니다. 승인 후 1회 남습니다.`
 - 월 3회를 모두 소진한 경우 다이얼로그에 안타까움을 나타내는 아이콘과 `이번 달 승인된 출근 정정 3회를 모두 사용했습니다.` 안내를 표시하고 제출 버튼을 비활성화한다.
-- 클라이언트 표시와 별개로 신청 생성 직전에 서버가 최신 월 승인 횟수를 다시 조회하여 3회 이상이면 신청 레코드를 생성하지 않는다.
-- 승인 처리 직전에도 서버가 해당 신청 월의 최신 승인 횟수를 다시 조회하며, 이미 3회이면 추가 승인과 확정 레코드를 생성하지 않는다.
+- 클라이언트 표시와 별개로 신청 생성 직전에 서버가 Redis 월 승인 quota marker를 확인하여 3회 이상이면 신청 레코드를 생성하지 않는다.
+- 승인 처리 직전에도 서버가 해당 신청 월의 Redis quota를 원자적으로 예약하며, 이미 3회이면 추가 승인과 확정 레코드를 생성하지 않는다.
+- 배포 후 사용자·월별 quota readiness marker가 없으면 Redis 출퇴근 partition 전체에서 해당 월에 생성된 일반 출근 정정신청과 승인 관계를 읽어 committed approval/request marker를 원자적으로 backfill한 뒤 readiness marker를 기록한다. 대상 월 partition이 없거나 dirty 상태이면 신청과 사용량 조회를 오류로 차단한다.
 - 서버는 사용자 ID 기준 Redis distributed lock으로 일반 출근 정정 신청 생성과 승인 처리를 같은 사용자에 대해 직렬화한다. 사용자 기준 lock을 사용하므로 월 경계에서 서로 다른 월 lock으로 분리되지 않으며, 처리 중에는 lock lease를 주기적으로 갱신한다. 승인 대기 신청 자체는 quota를 점유하지 않는다.
-- 신청 생성 가능 여부를 확인할 때는 사용자·월별 승인 quota를 임시 예약한 뒤 즉시 해제하여 ShotGrid에 아직 조회되지 않는 승인 marker까지 포함한다.
+- 신청 생성 가능 여부를 확인할 때는 사용자·월별 승인 quota를 임시 예약한 뒤 즉시 해제하여 cache 반영 전 승인 marker까지 포함한다.
 - 승인 처리 직전에는 사용자·월별 승인 quota를 요청별 token으로 원자적으로 예약한다. 승인 레코드 생성에 성공하면 token을 실제 승인 레코드 ID와 연결된 `committed-but-unobserved` marker로 전환한다.
 - 승인 quota 예약과 같은 Redis Lua에서 `출근 / 정정신청` record ID 기반 pending idempotency marker도 원자적으로 선점한다. 이 marker는 ShotGrid에서 아직 관찰되지 않은 승인 intent와 quota 1회를 나타내며, 같은 pending 또는 committed marker가 이미 있으면 중복 승인을 거부한다.
 - 승인 처리는 `출근 / 승인` 생성 → pending request marker를 committed로 전환하면서 승인 ID marker 확정 → `출근 / 확정` 생성 순서를 지킨다. marker 전환은 pending token과 pending request marker 소유권이 모두 유지된 경우에만 수행한다. token이 만료되거나 유실되면 확정 출근 생성을 중단하지만 pending request marker는 TTL 동안 남아 다른 승인이 quota를 초과하지 못하게 한다.
-- 같은 `출근 / 정정신청`을 parent로 하는 `출근 / 승인`이 이미 있으면 중복 승인 레코드를 생성하지 않는다.
-- 승인 레코드는 존재하지만 대응하는 `출근 / 확정` 생성이 실패한 요청을 다시 처리하면 기존 승인을 재사용하고 누락된 확정 출근만 생성한다. `출근 / 확정`의 `sg_parent`는 해당 `출근 / 정정신청`을 직접 가리켜 신청별로 식별한다. 기존 확정 출근까지 확인되면 새 레코드를 만들지 않고 기존 결과를 반환한다.
-- 확정 생성과 복구 경로는 request ID별 Redis confirmation idempotency marker를 owner token으로 원자적으로 선점한다. 확인 레코드 생성 전 request lock lease를 다시 확인하며, lease를 잃은 worker는 더 이상 확인 레코드를 쓰지 않는다. 확인 생성 결과가 불명확하거나 marker 확정에 실패하면 marker를 보존하고, ShotGrid에서 해당 신청의 확정 레코드가 관찰될 때 정리하여 read-after-write 지연 중 중복 생성을 막는다.
+- 같은 `출근 / 정정신청`을 parent로 하는 `출근 / 승인`이 Redis partition cache 또는 committed request marker에 이미 있으면 중복 승인 레코드를 생성하지 않는다.
+- 출근 정정 승인 처리는 write 전에 읽은 해당 근무일 Redis partition snapshot을 승인·확정 생성이 끝날 때까지 재사용한다. 승인 record 생성으로 partition이 dirty가 된 뒤에는 같은 요청 안에서도 partition을 다시 읽지 않으며, ShotGrid 조회로 대체하지 않는다.
+- 승인 레코드는 존재하지만 대응하는 `출근 / 확정` 생성이 실패한 요청을 다시 처리할 때 Redis partition cache에서 기존 승인을 재사용하고 누락된 확정 출근만 생성한다. cache에 기존 승인이 아직 반영되지 않았으면 오류로 처리하고 ShotGrid 재조회로 복구하지 않는다. `출근 / 확정`의 `sg_parent`는 해당 `출근 / 정정신청`을 직접 가리켜 신청별로 식별한다.
+- 확정 생성과 복구 경로는 request ID별 Redis confirmation idempotency marker를 owner token으로 원자적으로 선점한다. 확인 레코드 생성 전 request lock lease를 다시 확인하며, lease를 잃은 worker는 더 이상 확인 레코드를 쓰지 않는다. 확인 생성 결과가 불명확하거나 marker 확정에 실패하면 marker를 보존하고 partition cache 반영 후에만 재시도한다.
 - 외부 승인 경로는 `approved_by`와 유효한 HumanUser ID를 반드시 요구한다. 승인담당자가 없는 자동 확정은 공개 승인 경로를 호출하지 않고, 서버가 `sg_approver` 부재와 현재 supervisor 부재를 다시 확인한 뒤 private trusted internal 경로로만 처리한다.
-- 원본 출근의 현재 확정 시간을 조회할 때는 원본을 직접 parent로 하는 정정신청을 찾은 뒤, 그 신청을 parent로 하는 최신 `출근 / 확정`을 조회한다. 배포 전 생성된 기존 확정 레코드와의 전환 호환을 위해 원본을 직접 parent로 하는 `출근 / 확정`도 함께 조회한다.
+- 원본 출근의 현재 확정 시간을 조회할 때는 해당 날짜의 Redis partition cache에서 원본을 직접 parent로 하는 정정신청과 그 신청을 parent로 하는 최신 `출근 / 확정`을 찾는다. 배포 전 생성된 기존 확정 레코드와의 전환 호환도 같은 cache 안에서 처리한다.
 - pending quota 해제는 reservation token 소유권이 유지된 경우에만 request marker와 함께 원자적으로 수행한다. 만료된 이전 owner의 늦은 해제 요청은 새 owner의 marker를 제거할 수 없다.
-- pending token과 pending request marker에는 장애 복구용 TTL을 적용하고 committed marker는 만료시키지 않는다. 승인 생성 전 process가 종료되면 pending marker는 TTL 후 자동 복구되며, 승인 생성 결과가 불명확하면 TTL 동안 보존하여 중복 승인을 막는다. 월 사용량 또는 quota 조회에서 ShotGrid 승인 레코드 ID와 `sg_parent` request ID가 확인되면 Redis Lua script가 각 marker를 제거한다. 월 사용량은 ShotGrid 승인 레코드 수와 아직 관찰되지 않은 pending/committed request marker 수를 합산한다.
+- pending token과 pending request marker에는 장애 복구용 TTL을 적용하고 committed marker와 quota readiness marker는 만료시키지 않는다. 승인 생성 전 process가 종료되면 pending marker는 TTL 후 자동 복구되며, 승인 생성 결과가 불명확하면 marker를 보존하여 중복 승인을 막는다. 월 사용량과 quota는 readiness가 확인된 Redis committed marker를 기준으로 계산한다.
 - ShotGrid 생성 결과의 실제 `created_at` 월이 사전 확인 월과 다르면 실제 생성 월의 승인 횟수를 다시 확인한다. 실제 생성 월의 3회가 이미 소진된 경우 이번 처리에서 방금 생성한 정정신청 레코드 1건만 즉시 삭제하여 원복하고 신청 실패로 처리한다. 원복할 수 없으면 데이터 정합성 장애로 기록하고 운영 확인이 필요한 오류로 처리한다.
 - ShotGrid `created_at`이 timezone-aware 값이면 Asia/Seoul 기준 local naive datetime으로 정규화한 뒤 월을 판단한다.
 - 출퇴근 상태 응답은 현재 월 승인 횟수, 월 최대 횟수, 남은 횟수, 다음 승인 회차 및 소진 여부를 제공한다.
@@ -796,31 +801,35 @@ R1: 야근 신청
 - 신청자는 본인의 처리 중 또는 확정된 신청을 취소할 수 있다. 취소 시 원 신청을 parent로 하는 `휴일근무 / 취소` 레코드를 생성하며 기존 레코드를 수정하거나 삭제하지 않는다.
 - 같은 원 신청에 이미 취소 레코드가 있으면 중복 취소를 거부한다.
 - 여러 날짜를 한 번에 제출할 때 한 날짜라도 중복, 과거 날짜 또는 잘못된 형식이면 전체 제출을 거부하고 어떤 날짜의 신청 레코드도 생성하지 않는다.
-- 중복 검증과 생성은 신청자 ID 기준 Redis distributed lock 안에서 수행한다. lock 획득 후 ShotGrid를 다시 조회하여 같은 사용자의 동시 요청도 하나만 생성되게 한다.
+- 중복 검증과 생성은 신청자 ID 기준 Redis distributed lock 안에서 수행한다. lock 획득 후 신청대상일의 Redis partition cache를 다시 읽어 같은 사용자의 동시 요청도 하나만 생성되게 한다. cache가 없으면 오류로 처리한다.
 - 복수 날짜 생성 도중 일부 날짜에서 오류가 발생하면, 이번 요청에서 이미 만든 원 신청마다 `휴일근무 / 취소` 보상 레코드를 생성하여 활성 신청이 일부 날짜에만 남지 않게 한다. 보상 레코드는 각 원 신청을 parent로 가지며 감사 이력은 삭제하지 않는다.
 - 승인담당자가 없는 복수 날짜 신청도 모든 날짜의 원 신청 생성이 끝난 뒤 자동 승인을 시작한다. 원 신청 생성 중에는 승인/확정 레코드를 만들지 않는다.
-- 원 신청 code는 batch token과 신청대상일을 포함해 같은 batch 안에서도 고유하게 만든다. create 응답이 유실되면 code로 ShotGrid를 즉시 재조회하고, 실제 생성된 원 신청이 확인되면 보상 취소 대상에 포함한다.
+- 원 신청 code는 batch token과 신청대상일을 포함해 같은 batch 안에서도 고유하게 만든다. create 응답이 유실되면 ShotGrid를 재조회하지 않고 pending idempotency marker를 보존하여 중복 재시도를 막는다. 응답 유실로 생성 여부를 확인할 수 없는 레코드는 임의로 보상 취소하지 않는다.
 
 #### 동시 처리와 장애 복구
 
-- 승인, 반려, 취소는 원 신청 ID 기준 Redis distributed lock 안에서 처리한다. 같은 원 신청에 대한 동시 action은 직렬화하고 lock 안에서 자식 레코드를 다시 조회한다.
-- 사용자·날짜·재신청 generation별 원 신청 write와 원 신청·상태별 처리 write는 Redis pending/committed idempotency marker를 사용한다. ShotGrid create 결과가 불명확하면 pending marker를 5분간 보존하여 stale read 중 중복 write를 차단하고, 성공 결과는 record ID가 포함된 만료 없는 committed marker로 바꾼다.
-- 원 신청 ID별 action marker는 승인, 반려, 취소 중 하나만 허용한다. 같은 action의 장애 복구 재시도는 허용하지만 다른 action은 ShotGrid 조회가 지연되더라도 차단한다.
-- action marker는 Redis의 기존 값을 먼저 읽고, marker가 없을 때만 ShotGrid 조회 상태를 `SET NX`로 seed한다. 취소·반려 marker를 stale 승인 조회로 되돌려 쓰지 않으며, 승인에서 취소로의 정상 전이만 decision lock 안에서 단방향으로 허용한다.
+- 승인, 반려, 취소는 원 신청 ID 기준 Redis distributed lock 안에서 처리한다. 같은 원 신청에 대한 동시 action은 직렬화하고 lock 안에서 Redis partition cache의 자식 레코드를 다시 읽는다.
+- 사용자·날짜·재신청 generation별 원 신청 write와 원 신청·상태별 처리 write는 Redis pending/committed idempotency marker를 사용한다. create 호출 전 pending marker에는 5분 TTL을 적용하지만 create가 예외로 끝나 생성 여부가 불명확하면 owner token CAS로 만료 없는 `uncertain` marker로 전환한다. `uncertain`은 partition cache sync 또는 운영 reconciliation 전까지 모든 재시도를 차단한다. 성공 결과는 record ID가 포함된 만료 없는 committed marker로 바꾼다.
+- 원 신청 ID별 action marker는 승인, 반려, 취소 중 하나만 허용한다. 같은 action의 장애 복구 재시도는 partition cache 반영이 확인된 뒤에만 허용하며 다른 action은 cache 반영이 지연되더라도 차단한다.
+- action marker는 Redis의 기존 값을 먼저 읽고, marker가 없을 때만 partition cache에서 관찰한 상태를 `SET NX`로 seed한다. 취소·반려 marker를 stale cache 상태로 되돌려 쓰지 않으며, 승인에서 취소로의 정상 전이만 decision lock 안에서 단방향으로 허용한다.
 - action 처리자는 reservation token을 보관하고, 처리 완료 marker는 Redis Lua CAS로 현재 값이 자신의 token 또는 같은 committed action일 때만 기록한다. lease를 잃은 stale worker는 최신 취소·반려 marker를 승인 상태로 되돌릴 수 없다.
 - pending seed, 승인→취소 전이, committed CAS는 action marker와 actor/reason audit marker를 같은 Redis Lua transaction에서 함께 기록한다. stale ShotGrid write를 보상할 때는 이 audit marker의 실제 처리자와 사유를 그대로 사용한다.
-- 승인은 idempotent 복구를 지원한다. `승인`과 `확정`이 모두 있으면 기존 결과를 반환하고, `승인`만 있으면 새 `승인`을 만들지 않고 누락된 `확정`만 생성한다.
+- 승인은 Redis partition cache 기반 idempotent 복구를 지원한다. `승인`과 `확정`이 모두 있으면 기존 결과를 반환하고, `승인`만 있으면 새 `승인`을 만들지 않고 누락된 `확정`만 생성한다. committed marker는 있지만 cache에 결과가 없으면 명시적으로 실패한다.
 - `승인`만 있고 `확정`이 없는 요청은 승인 대기 목록에 계속 노출하여 Web 재호출이 누락된 `확정` 복구 경로에 도달하게 한다. `확정`, `반려`, `취소`만 승인 대기 목록의 terminal 처리 상태다.
 - `반려` 또는 `취소`가 먼저 생성된 원 신청은 승인하거나 다른 terminal 상태로 처리할 수 없다.
 - 확정된 신청을 신청자가 취소하는 정상 전이는 허용한다. 이 경우 action marker는 committed approve에서 pending/committed cancel로 전환되며 취소는 public cancellation 경로의 decision lock과 상태 검증을 모두 거친다.
 - lock은 처리 중 lease를 갱신한다. lease 소유권을 잃으면 추가 ShotGrid 레코드를 생성하지 않고 재시도를 안내한다.
+- 출퇴근 또는 휴가 write를 시작하기 직전 해당 기간 partition에 고유 generation 값을 가진 만료 없는 dirty marker를 설정하고 process memo를 무효화한다. ShotGrid mutation이 성공하거나 응답이 불명확하게 실패해도 refresh가 완료되기 전까지 dirty를 유지한다. reader는 dirty marker가 남아 있는 partition을 stale 정상 데이터로 반환하지 않고 오류로 처리한다. event/reconcile cache refresh는 조회 시작 시 generation을 캡처하고, Redis payload 저장 완료 뒤 marker가 같은 generation일 때만 원자적으로 삭제한다. 조회 도중 새 write가 발생해 generation이 바뀌면 dirty marker를 유지한다.
+- 기간 partition cache는 전체 기간 ShotGrid 조회와 Redis payload 저장이 끝난 뒤에만 별도 coverage marker를 기록한다. runtime reader는 payload key 존재만으로 완전성을 추정하지 않고 coverage marker를 함께 요구하며, marker가 없는 과거·부분·중단 rebuild payload는 오류로 거부한다.
+- reconcile은 record ID 비교 전에 dirty marker, coverage marker, payload 형식을 검사한다. dirty 상태, coverage 누락, payload 누락·형식 오류 중 하나라도 있으면 ID 집합이 같아도 강제로 전체 partition을 rebuild한다.
 
 #### 신청 및 승인 목록
 
 - 네비게이션 바의 `알림` 페이지에서 기존 `승인 요청` 영역의 이름을 `신청 및 승인 목록`으로 변경한다.
 - 신청자는 본인의 휴일근무 신청을 신청대상일, 신청사유, 현재 상태와 함께 조회한다.
 - 승인담당자는 자신에게 배정된 휴일근무 승인 대기 요청을 같은 목록에서 조회하고 승인 또는 반려할 수 있다.
-- 승인 대기 조회는 최근 출퇴근 partition 범위와 별도로 휴일근무 원 신청을 ShotGrid에서 직접 조회해 병합한다. 따라서 현재 월보다 먼 미래 날짜의 신청도 승인 목록에서 누락되지 않아야 한다.
+- 승인 대기 조회는 최근 3개월 및 향후 13개월의 Redis 출퇴근 partition을 모두 읽는다. 휴일근무 최대 신청 범위인 366일 이내 미래 partition도 포함하며, 필수 partition이 하나라도 없거나 dirty 상태이면 불완전한 목록을 반환하지 않고 오류로 중단한다. ShotGrid 직접 조회를 병합하지 않는다.
+- 승인 대기에서 request record에 `sg_approver`가 없으면 `sg:user` Redis cache의 요청자 `sg_part_supervisor`만 사용한다. `sg:user` cache, 요청자, 또는 `sg_part_supervisor` field가 누락되면 빈 승인 목록으로 숨기거나 ShotGrid를 조회하지 않고 오류로 중단한다.
 - 신청 상태는 원 신청의 자식 레코드를 기준으로 `승인 대기`, `승인`, `반려`, `취소`로 계산한다. `확정`이 있으면 `승인`, `반려`가 있으면 `반려`, `취소`가 있으면 `취소`, 처리 레코드가 없으면 `승인 대기`다.
 - 본인의 취소 가능한 신청에는 `신청 취소` action을 표시하고, 다른 사용자의 승인 대기 신청에만 `승인`과 `거절` action을 표시한다.
 
@@ -840,7 +849,7 @@ R1: 야근 신청
 
 department와 무관하게 요청자의 `sg_part_supervisor`에 등록된 첫 번째 HumanUser만 승인담당자로 사용합니다. `sg_part_supervisor`가 실제로 비어 있으면 승인담당자가 없는 정상 상태로 보고, 출근 정정, 연속근무, 야근, 휴일근무, 외근 신청은 생성 직후 `승인`과 `확정` 레코드를 자동 생성합니다. 이때 신청, 승인, 확정 레코드의 `sg_approver`는 비워 둡니다.
 
-`sg_part_supervisor` 조회 실패, Redis cache 미생성, ShotGrid 조회 실패, `HumanUser` 레코드의 필드 누락은 승인담당자 없음으로 취급하지 않습니다. 이 경우 자동 확정을 수행하지 않고 오류로 처리해야 합니다.
+`sg_part_supervisor` 조회 실패, Redis cache 미생성 또는 `HumanUser` cache 레코드의 필드 누락은 승인담당자 없음으로 취급하지 않습니다. 이 경우 ShotGrid 조회로 fallback하지 않고 자동 확정도 수행하지 않으며 오류로 처리해야 합니다.
 
 #### 출근 정정 신청 조회 범위 (누구의 정정을 볼 수 있는가)
 
@@ -957,17 +966,13 @@ if correction_approver and correction_approver.get('id') == approver_id:
 ```python
 def get_latest_confirmed_attendance(sg_user, sg_date, sg_type):
     """최신 정상 출퇴근 레코드를 최종 확정값으로 사용한다."""
-    records = sg.find(
-        'CustomNonProjectEntity10',
-        [
-            ['sg_user', 'is', sg_user],
-            ['sg_date', 'is', sg_date],
-            ['sg_type', 'is', sg_type],
-            ['sg_status', 'in', ['정상', '확정']],
-        ],
-        ['id', 'sg_time', 'created_at'],
-        order=[{'field_name': 'created_at', 'direction': 'desc'}],
-    )
+    summary = AttendanceQueryService().get_user_day(sg_user['id'], sg_date)
+    records = [
+        record for record in summary['attendance_records']
+        if record.get('sg_type') == sg_type
+        and record.get('sg_status') in ('정상', '확정')
+    ]
+    records.sort(key=lambda record: str(record.get('created_at') or ''), reverse=True)
     return records[0] if records else None
 ```
 
