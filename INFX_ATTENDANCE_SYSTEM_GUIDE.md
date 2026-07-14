@@ -53,7 +53,7 @@
 | `sg_user` | 사용자 | entity(HumanUser) | O | 출퇴근 대상자 또는 신청자 |
 | `sg_approver` | 승인담당자 | entity(HumanUser) | - | 승인해야 할 담당자 또는 실제 처리자. 승인담당자가 없는 자동 확정 레코드는 비워 둔다. |
 | `sg_date` | 근무일 | date | O | 출퇴근 날짜 |
-| `sg_type` | 구분 | list | O | `출근`, `퇴근`, `석식`, `중식`, `야근`, `휴일근무`, `외근`, `사유서` |
+| `sg_type` | 구분 | list | O | `출근`, `퇴근`, `석식`, `중식`, `야근`, `외근`, `사유서` |
 | `sg_status` | 상태 | list | - | `정상`, `신청`, `정정신청`, `승인`, `확정`, `반려`, `포기`, `취소` |
 | `sg_time` | 시간 | date_time | - | 출퇴근 시간 또는 정정 희망 시간 |
 | `sg_parent` | Parent | entity(Self) | - | 연결 대상 레코드 |
@@ -68,7 +68,6 @@
 | 석식/중식 포기 | 포기 체크 시각 |
 | 야근 신청 | 예상 퇴근 시간 |
 | 야근 승인/확정/반려/포기 | 원 요청의 예상 퇴근 시간 |
-| 휴일근무 신청/승인/확정/반려/취소 | null (사용하지 않음) |
 | 외근 후 출근 신청/승인/확정/반려/취소 | 외근 시작 인정 시간. 기본 규칙에서는 당일 `10:00:00` |
 | 외근 후 퇴근 신청/승인/확정/반려/취소 | 외근 종료 인정 시간. 실제 출근, 휴가, 점심 제외 기준으로 정상근무 8시간을 충족하는 시각 |
 | 출근 승인/반려/포기 | null (의미 없음) |
@@ -80,7 +79,6 @@
 |---------------|----------------|----------------|
 | 확정 출퇴근 | 대상 직원 (본인) | 없음 |
 | 정정 신청 | 대상 직원 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
-| 휴일근무 신청 | 대상 직원 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
 | 승인/반려 | 대상 직원 (본인) | 실제 처리자. 승인담당자 부재 자동 승인/확정은 없음 |
 | 외근 신청 | 대상 직원 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
 | 석식/중식 포기 | 대상 직원 (본인) | 없음 |
@@ -119,7 +117,7 @@
 
 #### sg_type
 
-`외근`과 `휴일근무`는 코드 배포 전에 ShotGrid `sg_type` list 값으로 먼저 추가해야 한다. 배포 전에 값이 없으면 해당 신청 업로드가 실패할 수 있다.
+`외근`은 코드 배포 전에 ShotGrid `sg_type` list 값으로 먼저 추가해야 한다. 배포 전에 값이 없으면 `외근 / 신청` 업로드가 실패할 수 있다.
 
 | Code | Display Name | 설명 |
 |------|--------------|------|
@@ -128,7 +126,6 @@
 | `석식` | 석식 | 저녁식사 안함 레코드 |
 | `중식` | 중식 | 점심 안함 레코드 |
 | `야근` | 야근 | 야근 신청 워크플로우 레코드 |
-| `휴일근무` | 휴일근무 | 평일 또는 비근로일의 휴일근무 사전 신청 워크플로우 레코드 |
 | `외근` | 외근 | 외근 후 출근/외근 후 퇴근 승인 워크플로우 레코드 |
 | `사유서` | 사유서 | 지난 달 근태 미비 사유서 레코드 |
 
@@ -137,13 +134,13 @@
 | Code | Display Name | 설명 |
 |------|--------------|------|
 | `정상` | 정상 | 확정된 출근/퇴근 기록 |
-| `신청` | 신청 | 최초 야근, 휴일근무 또는 외근 신청 |
+| `신청` | 신청 | 최초 야근 또는 외근 신청 |
 | `정정신청` | 정정신청 | 출근 정정 신청 |
-| `승인` | 승인 | 출근 정정 승인, 야근 승인, 휴일근무 승인 또는 외근 승인 |
-| `확정` | 확정 | 출근 정정 승인 후 확정, 야근 확정, 휴일근무 확정, 외근 확정 또는 근태 미비 사유서 확정 |
-| `반려` | 반려 | 출근 정정 반려, 야근 반려, 휴일근무 반려 또는 외근 반려 |
+| `승인` | 승인 | 출근 정정 승인, 야근 승인 또는 외근 승인 |
+| `확정` | 확정 | 출근 정정 승인 후 확정, 야근 확정, 외근 확정 또는 근태 미비 사유서 확정 |
+| `반려` | 반려 | 출근 정정 반려, 야근 반려 또는 외근 반려 |
 | `포기` | 포기 | 출근 정정 반려 후 포기, 석식/중식 포기, 야근 신청 포기 |
-| `취소` | 취소 | 퇴근 취소, 기존 야근 취소, 휴일근무 신청 취소 또는 외근 취소 레코드 |
+| `취소` | 취소 | 퇴근 취소, 기존 야근 취소 또는 외근 취소 레코드 |
 
 ### 2.8 레코드 종류 (sg_type + sg_status 조합)
 
@@ -165,11 +162,6 @@
 | 반려 | 야근 | 야근 신청 반려 | 반려한 야근 신청 레코드 |
 | 포기 | 야근 | 야근 신청 포기 | 포기한 야근 신청 레코드 |
 | 취소 | 야근 | 기존 야근 취소 레코드 | 기존 취소 대상 야근 신청 레코드 |
-| 신청 | 휴일근무 | 휴일근무 신청 또는 반려/취소 후 재신청 | 최초 신청은 -, 재신청은 직전 원 신청 레코드 |
-| 승인 | 휴일근무 | 휴일근무 신청 승인 | 원 휴일근무 신청 레코드 |
-| 확정 | 휴일근무 | 휴일근무 승인 확정 | 원 휴일근무 신청 레코드 |
-| 반려 | 휴일근무 | 휴일근무 신청 반려 | 원 휴일근무 신청 레코드 |
-| 취소 | 휴일근무 | 휴일근무 신청 취소 | 원 휴일근무 신청 레코드 |
 | 신청 | 외근 | 외근 후 출근 또는 외근 후 퇴근 신청 | 실제 출근 또는 실제 퇴근 레코드 |
 | 승인 | 외근 | 외근 신청 승인 | 승인한 외근 신청 레코드 |
 | 확정 | 외근 | 외근 인정 확정 | 승인한 외근 신청 레코드 |
@@ -193,8 +185,6 @@
 - `홍길동_20260305_중식_포기_120000` — 점심 안함
 - `홍길동_20260305_야근_신청_180000` — 최초 야근 신청
 - `홍길동_20260305_야근_확정_181000` — 야근 확정
-- `홍길동_20260307_휴일근무_신청_181500` — 휴일근무 신청
-- `홍길동_20260307_휴일근무_확정_182000` — 휴일근무 확정
 - `홍길동_20260305_외근_신청_103000` — 외근 신청
 - `홍길동_20260305_외근_확정_110000` — 외근 확정
 - `홍길동_20260305_사유서_확정_093000` — 지난 달 근태 미비 사유서
@@ -418,15 +408,13 @@ R1: 출근 정정 신청
 ```python
 def get_attendance_status(original_attendance):
     """출퇴근 레코드의 현재 상태를 반환한다."""
-    summary = AttendanceQueryService().get_user_day(
-        original_attendance['sg_user']['id'],
-        original_attendance['sg_date'],
+    # 관련 레코드 조회 (최신순)
+    related = sg.find(
+        'CustomNonProjectEntity10',
+        [['sg_parent', 'is', original_attendance]],
+        ['sg_status', 'sg_type', 'created_at'],
+        order=[{'field_name': 'created_at', 'direction': 'desc'}]
     )
-    related = [
-        record for record in summary['attendance_records']
-        if (record.get('sg_parent') or {}).get('id') == original_attendance['id']
-    ]
-    related.sort(key=lambda record: str(record.get('created_at') or ''), reverse=True)
     
     if not related:
         return '정상'  # 정정 신청 없음
@@ -621,27 +609,24 @@ can_claim_lunch_cost = work_minutes >= 480분
 - 일반 출근 정정 신청의 사유는 연속근무 인정 전용 문구인 `연속근무로 인한 정상출근 인정`으로 시작할 수 없다. 서버는 해당 입력을 거부하여 월 횟수 제한 우회를 방지한다.
 - 반려 후 재신청은 가능하며, 재신청도 승인된 경우에만 월 신청 횟수에 포함한다.
 - 같은 근무일의 일반 출근 정정신청이 한 번 승인되면 해당 근무일에는 더 이상 출근 정정신청을 생성할 수 없다. 승인 대기, 반려, 포기 상태만 있는 근무일은 이 제한으로 막지 않는다.
-- 출퇴근 runtime 조회는 Redis partition cache와 Redis marker만 사용한다. cache miss, cache payload 오류 또는 아직 반영되지 않은 write는 오류로 처리하며 ShotGrid `find()`, `find_one()` 또는 partition 즉시 rebuild로 fallback하지 않는다.
-- 승인 quota를 확정하는 Redis Lua에서 `sg_user + sg_date` 기준 승인 marker도 같은 원자 연산으로 확정한다. 새 신청 직전에는 Redis partition cache와 이 marker를 함께 확인하여 cache 반영 지연 중에도 승인된 근무일의 재신청을 막는다.
+- 승인 quota를 확정하는 Redis Lua에서 `sg_user + sg_date` 기준 승인 marker도 같은 원자 연산으로 확정한다. 새 신청 직전에는 ShotGrid 승인 레코드와 이 marker를 함께 확인하여 ShotGrid read-after-write 지연 중에도 승인된 근무일의 재신청을 막는다.
 - 출근 시간 클릭과 정정 신청 다이얼로그 열기는 월 사용 횟수와 관계없이 항상 허용한다. 기존의 비근로일, 출근 기록 없음, 처리 중인 정정 신청 존재 등 횟수 이외의 신청 불가 조건은 그대로 적용한다.
 - 월 3회를 소진하지 않은 경우 다이얼로그에 이번 신청이 승인되면 몇 번째인지와 승인 후 남는 횟수를 표시한다. 예: `이번 신청이 승인되면 2번째입니다. 승인 후 1회 남습니다.`
 - 월 3회를 모두 소진한 경우 다이얼로그에 안타까움을 나타내는 아이콘과 `이번 달 승인된 출근 정정 3회를 모두 사용했습니다.` 안내를 표시하고 제출 버튼을 비활성화한다.
-- 클라이언트 표시와 별개로 신청 생성 직전에 서버가 Redis 월 승인 quota marker를 확인하여 3회 이상이면 신청 레코드를 생성하지 않는다.
-- 승인 처리 직전에도 서버가 해당 신청 월의 Redis quota를 원자적으로 예약하며, 이미 3회이면 추가 승인과 확정 레코드를 생성하지 않는다.
-- 배포 후 사용자·월별 quota readiness marker가 없으면 Redis 출퇴근 partition 전체에서 해당 월에 생성된 일반 출근 정정신청과 승인 관계를 읽어 committed approval/request marker를 원자적으로 backfill한 뒤 readiness marker를 기록한다. 대상 월 partition이 없거나 dirty 상태이면 신청과 사용량 조회를 오류로 차단한다.
+- 클라이언트 표시와 별개로 신청 생성 직전에 서버가 최신 월 승인 횟수를 다시 조회하여 3회 이상이면 신청 레코드를 생성하지 않는다.
+- 승인 처리 직전에도 서버가 해당 신청 월의 최신 승인 횟수를 다시 조회하며, 이미 3회이면 추가 승인과 확정 레코드를 생성하지 않는다.
 - 서버는 사용자 ID 기준 Redis distributed lock으로 일반 출근 정정 신청 생성과 승인 처리를 같은 사용자에 대해 직렬화한다. 사용자 기준 lock을 사용하므로 월 경계에서 서로 다른 월 lock으로 분리되지 않으며, 처리 중에는 lock lease를 주기적으로 갱신한다. 승인 대기 신청 자체는 quota를 점유하지 않는다.
-- 신청 생성 가능 여부를 확인할 때는 사용자·월별 승인 quota를 임시 예약한 뒤 즉시 해제하여 cache 반영 전 승인 marker까지 포함한다.
+- 신청 생성 가능 여부를 확인할 때는 사용자·월별 승인 quota를 임시 예약한 뒤 즉시 해제하여 ShotGrid에 아직 조회되지 않는 승인 marker까지 포함한다.
 - 승인 처리 직전에는 사용자·월별 승인 quota를 요청별 token으로 원자적으로 예약한다. 승인 레코드 생성에 성공하면 token을 실제 승인 레코드 ID와 연결된 `committed-but-unobserved` marker로 전환한다.
 - 승인 quota 예약과 같은 Redis Lua에서 `출근 / 정정신청` record ID 기반 pending idempotency marker도 원자적으로 선점한다. 이 marker는 ShotGrid에서 아직 관찰되지 않은 승인 intent와 quota 1회를 나타내며, 같은 pending 또는 committed marker가 이미 있으면 중복 승인을 거부한다.
 - 승인 처리는 `출근 / 승인` 생성 → pending request marker를 committed로 전환하면서 승인 ID marker 확정 → `출근 / 확정` 생성 순서를 지킨다. marker 전환은 pending token과 pending request marker 소유권이 모두 유지된 경우에만 수행한다. token이 만료되거나 유실되면 확정 출근 생성을 중단하지만 pending request marker는 TTL 동안 남아 다른 승인이 quota를 초과하지 못하게 한다.
-- 같은 `출근 / 정정신청`을 parent로 하는 `출근 / 승인`이 Redis partition cache 또는 committed request marker에 이미 있으면 중복 승인 레코드를 생성하지 않는다.
-- 출근 정정 승인 처리는 write 전에 읽은 해당 근무일 Redis partition snapshot을 승인·확정 생성이 끝날 때까지 재사용한다. 승인 record 생성으로 partition이 dirty가 된 뒤에는 같은 요청 안에서도 partition을 다시 읽지 않으며, ShotGrid 조회로 대체하지 않는다.
-- 승인 레코드는 존재하지만 대응하는 `출근 / 확정` 생성이 실패한 요청을 다시 처리할 때 Redis partition cache에서 기존 승인을 재사용하고 누락된 확정 출근만 생성한다. cache에 기존 승인이 아직 반영되지 않았으면 오류로 처리하고 ShotGrid 재조회로 복구하지 않는다. `출근 / 확정`의 `sg_parent`는 해당 `출근 / 정정신청`을 직접 가리켜 신청별로 식별한다.
-- 확정 생성과 복구 경로는 request ID별 Redis confirmation idempotency marker를 owner token으로 원자적으로 선점한다. 확인 레코드 생성 전 request lock lease를 다시 확인하며, lease를 잃은 worker는 더 이상 확인 레코드를 쓰지 않는다. 확인 생성 결과가 불명확하거나 marker 확정에 실패하면 marker를 보존하고 partition cache 반영 후에만 재시도한다.
+- 같은 `출근 / 정정신청`을 parent로 하는 `출근 / 승인`이 이미 있으면 중복 승인 레코드를 생성하지 않는다.
+- 승인 레코드는 존재하지만 대응하는 `출근 / 확정` 생성이 실패한 요청을 다시 처리하면 기존 승인을 재사용하고 누락된 확정 출근만 생성한다. `출근 / 확정`의 `sg_parent`는 해당 `출근 / 정정신청`을 직접 가리켜 신청별로 식별한다. 기존 확정 출근까지 확인되면 새 레코드를 만들지 않고 기존 결과를 반환한다.
+- 확정 생성과 복구 경로는 request ID별 Redis confirmation idempotency marker를 owner token으로 원자적으로 선점한다. 확인 레코드 생성 전 request lock lease를 다시 확인하며, lease를 잃은 worker는 더 이상 확인 레코드를 쓰지 않는다. 확인 생성 결과가 불명확하거나 marker 확정에 실패하면 marker를 보존하고, ShotGrid에서 해당 신청의 확정 레코드가 관찰될 때 정리하여 read-after-write 지연 중 중복 생성을 막는다.
 - 외부 승인 경로는 `approved_by`와 유효한 HumanUser ID를 반드시 요구한다. 승인담당자가 없는 자동 확정은 공개 승인 경로를 호출하지 않고, 서버가 `sg_approver` 부재와 현재 supervisor 부재를 다시 확인한 뒤 private trusted internal 경로로만 처리한다.
-- 원본 출근의 현재 확정 시간을 조회할 때는 해당 날짜의 Redis partition cache에서 원본을 직접 parent로 하는 정정신청과 그 신청을 parent로 하는 최신 `출근 / 확정`을 찾는다. 배포 전 생성된 기존 확정 레코드와의 전환 호환도 같은 cache 안에서 처리한다.
+- 원본 출근의 현재 확정 시간을 조회할 때는 원본을 직접 parent로 하는 정정신청을 찾은 뒤, 그 신청을 parent로 하는 최신 `출근 / 확정`을 조회한다. 배포 전 생성된 기존 확정 레코드와의 전환 호환을 위해 원본을 직접 parent로 하는 `출근 / 확정`도 함께 조회한다.
 - pending quota 해제는 reservation token 소유권이 유지된 경우에만 request marker와 함께 원자적으로 수행한다. 만료된 이전 owner의 늦은 해제 요청은 새 owner의 marker를 제거할 수 없다.
-- pending token과 pending request marker에는 장애 복구용 TTL을 적용하고 committed marker와 quota readiness marker는 만료시키지 않는다. 승인 생성 전 process가 종료되면 pending marker는 TTL 후 자동 복구되며, 승인 생성 결과가 불명확하면 marker를 보존하여 중복 승인을 막는다. 월 사용량과 quota는 readiness가 확인된 Redis committed marker를 기준으로 계산한다.
+- pending token과 pending request marker에는 장애 복구용 TTL을 적용하고 committed marker는 만료시키지 않는다. 승인 생성 전 process가 종료되면 pending marker는 TTL 후 자동 복구되며, 승인 생성 결과가 불명확하면 TTL 동안 보존하여 중복 승인을 막는다. 월 사용량 또는 quota 조회에서 ShotGrid 승인 레코드 ID와 `sg_parent` request ID가 확인되면 Redis Lua script가 각 marker를 제거한다. 월 사용량은 ShotGrid 승인 레코드 수와 아직 관찰되지 않은 pending/committed request marker 수를 합산한다.
 - ShotGrid 생성 결과의 실제 `created_at` 월이 사전 확인 월과 다르면 실제 생성 월의 승인 횟수를 다시 확인한다. 실제 생성 월의 3회가 이미 소진된 경우 이번 처리에서 방금 생성한 정정신청 레코드 1건만 즉시 삭제하여 원복하고 신청 실패로 처리한다. 원복할 수 없으면 데이터 정합성 장애로 기록하고 운영 확인이 필요한 오류로 처리한다.
 - ShotGrid `created_at`이 timezone-aware 값이면 Asia/Seoul 기준 local naive datetime으로 정규화한 뒤 월을 판단한다.
 - 출퇴근 상태 응답은 현재 월 승인 횟수, 월 최대 횟수, 남은 횟수, 다음 승인 회차 및 소진 여부를 제공한다.
@@ -756,100 +741,23 @@ R1: 야근 신청
 - 새 레코드는 `포기`를 사용하고, 기존 데이터의 `취소`는 호환 목적으로 terminal 상태로 함께 인정한다.
 - Python API 상태 문자열은 기존 UI 호환을 위해 `canceled`를 유지한다.
 
-### 4.8 휴일근무 신청 워크플로우
-
-휴일근무 신청은 `CustomNonProjectEntity10`을 사용하고 `sg_type = 휴일근무`로 기록한다. 명칭의 휴일 여부와 관계없이 평일과 비근로일 모두 신청할 수 있으며, 당일과 미래 날짜만 신청할 수 있다. 지난 날짜는 UI에서 선택할 수 없고 API에서도 거부한다.
-
-- 한 번에 신청할 수 있는 날짜는 최대 31일이다.
-- 신청대상일은 신청일 기준 366일 이내여야 한다.
-- 신청사유는 1자 이상 500자 이하여야 한다.
-- 같은 사용자의 신청 제출은 10초에 한 번만 허용한다. 이 제한은 대량 ShotGrid write를 유발하는 반복 요청을 차단하기 위한 API abuse control이다.
-
-#### 신청 UI와 복수 날짜 처리
-
-1. 로그인 버튼의 계정 메뉴에서 `휴일근무 신청`을 누르면 신청 모달을 연다.
-2. 신청자는 달력에서 하나 이상의 날짜를 클릭하여 복수 선택할 수 있다.
-3. 달력의 확인 버튼을 누르면 선택한 날짜를 오름차순으로 정렬하고 `YYYY-MM-DD, YYYY-MM-DD` 형식의 plain-text 날짜 목록으로 만든다.
-4. 제출 시 서버는 plain-text 날짜 목록을 파싱하고, 중복 날짜 제거, 날짜 형식, 당일 이후 여부를 다시 검증한다.
-5. 선택한 날짜마다 독립된 `휴일근무 / 신청` 레코드를 하나씩 생성한다. 같은 제출의 모든 레코드는 동일한 신청사유를 사용한다.
-6. 신청사유는 필수이며 공백만 입력할 수 없다.
-
-#### 레코드 형식
-
-| 필드 | 값 |
-|------|-----|
-| `sg_type` | `휴일근무` |
-| `sg_status` | `신청`, `승인`, `확정`, `반려`, `취소` 중 lifecycle에 맞는 값 |
-| `sg_user` | 신청자 |
-| `sg_approver` | 신청 시 승인담당자, 승인/반려 시 실제 처리자. 자동 승인/확정이면 비움 |
-| `sg_date` | 선택한 신청대상일 |
-| `sg_time` | null (사용하지 않음) |
-| `sg_reason` | 신청 레코드는 신청사유, 반려 레코드는 반려사유 |
-| `sg_parent` | 최초 신청은 없음. 승인/확정/반려/취소는 모두 원 신청 레코드 |
-
-#### 신청 → 승인 → 확정
-
-1. 승인담당자가 있으면 날짜별 `휴일근무 / 신청` 레코드만 만들고 승인 대기 상태로 둔다.
-2. 승인담당자가 승인하면 원 신청을 parent로 하는 `휴일근무 / 승인`과 `휴일근무 / 확정` 레코드를 생성한다.
-3. 요청자의 `sg_part_supervisor`가 비어 있으면 신청 직후 원 신청을 parent로 하는 `휴일근무 / 승인`과 `휴일근무 / 확정`을 자동 생성한다. 자동 생성된 세 레코드의 `sg_approver`는 비워 둔다.
-4. `sg_part_supervisor` 조회 실패나 필드 누락은 승인담당자 없음으로 취급하지 않고 오류로 처리한다.
-
-#### 중복 신청, 반려 후 재신청, 취소
-
-- 같은 사용자와 같은 신청대상일에 처리 중이거나 확정된 휴일근무 신청이 있으면 중복 신청을 거부한다.
-- `휴일근무 / 반려` 또는 `휴일근무 / 취소`로 종료된 날짜는 다시 신청할 수 있다. 재신청의 `sg_parent`는 직전 원 신청 레코드를 가리킨다.
-- 신청자는 본인의 처리 중 또는 확정된 신청을 취소할 수 있다. 취소 시 원 신청을 parent로 하는 `휴일근무 / 취소` 레코드를 생성하며 기존 레코드를 수정하거나 삭제하지 않는다.
-- 같은 원 신청에 이미 취소 레코드가 있으면 중복 취소를 거부한다.
-- 여러 날짜를 한 번에 제출할 때 한 날짜라도 중복, 과거 날짜 또는 잘못된 형식이면 전체 제출을 거부하고 어떤 날짜의 신청 레코드도 생성하지 않는다.
-- 중복 검증과 생성은 신청자 ID 기준 Redis distributed lock 안에서 수행한다. lock 획득 후 신청대상일의 Redis partition cache를 다시 읽어 같은 사용자의 동시 요청도 하나만 생성되게 한다. cache가 없으면 오류로 처리한다.
-- 복수 날짜 생성 도중 일부 날짜에서 오류가 발생하면, 이번 요청에서 이미 만든 원 신청마다 `휴일근무 / 취소` 보상 레코드를 생성하여 활성 신청이 일부 날짜에만 남지 않게 한다. 보상 레코드는 각 원 신청을 parent로 가지며 감사 이력은 삭제하지 않는다.
-- 승인담당자가 없는 복수 날짜 신청도 모든 날짜의 원 신청 생성이 끝난 뒤 자동 승인을 시작한다. 원 신청 생성 중에는 승인/확정 레코드를 만들지 않는다.
-- 원 신청 code는 batch token과 신청대상일을 포함해 같은 batch 안에서도 고유하게 만든다. create 응답이 유실되면 ShotGrid를 재조회하지 않고 pending idempotency marker를 보존하여 중복 재시도를 막는다. 응답 유실로 생성 여부를 확인할 수 없는 레코드는 임의로 보상 취소하지 않는다.
-
-#### 동시 처리와 장애 복구
-
-- 승인, 반려, 취소는 원 신청 ID 기준 Redis distributed lock 안에서 처리한다. 같은 원 신청에 대한 동시 action은 직렬화하고 lock 안에서 Redis partition cache의 자식 레코드를 다시 읽는다.
-- 사용자·날짜·재신청 generation별 원 신청 write와 원 신청·상태별 처리 write는 Redis pending/committed idempotency marker를 사용한다. create 호출 전 pending marker에는 5분 TTL을 적용하지만 create가 예외로 끝나 생성 여부가 불명확하면 owner token CAS로 만료 없는 `uncertain` marker로 전환한다. `uncertain`은 partition cache sync 또는 운영 reconciliation 전까지 모든 재시도를 차단한다. 성공 결과는 record ID가 포함된 만료 없는 committed marker로 바꾼다.
-- 원 신청 ID별 action marker는 승인, 반려, 취소 중 하나만 허용한다. 같은 action의 장애 복구 재시도는 partition cache 반영이 확인된 뒤에만 허용하며 다른 action은 cache 반영이 지연되더라도 차단한다.
-- action marker는 Redis의 기존 값을 먼저 읽고, marker가 없을 때만 partition cache에서 관찰한 상태를 `SET NX`로 seed한다. 취소·반려 marker를 stale cache 상태로 되돌려 쓰지 않으며, 승인에서 취소로의 정상 전이만 decision lock 안에서 단방향으로 허용한다.
-- action 처리자는 reservation token을 보관하고, 처리 완료 marker는 Redis Lua CAS로 현재 값이 자신의 token 또는 같은 committed action일 때만 기록한다. lease를 잃은 stale worker는 최신 취소·반려 marker를 승인 상태로 되돌릴 수 없다.
-- pending seed, 승인→취소 전이, committed CAS는 action marker와 actor/reason audit marker를 같은 Redis Lua transaction에서 함께 기록한다. stale ShotGrid write를 보상할 때는 이 audit marker의 실제 처리자와 사유를 그대로 사용한다.
-- 승인은 Redis partition cache 기반 idempotent 복구를 지원한다. `승인`과 `확정`이 모두 있으면 기존 결과를 반환하고, `승인`만 있으면 새 `승인`을 만들지 않고 누락된 `확정`만 생성한다. committed marker는 있지만 cache에 결과가 없으면 명시적으로 실패한다.
-- `승인`만 있고 `확정`이 없는 요청은 승인 대기 목록에 계속 노출하여 Web 재호출이 누락된 `확정` 복구 경로에 도달하게 한다. `확정`, `반려`, `취소`만 승인 대기 목록의 terminal 처리 상태다.
-- `반려` 또는 `취소`가 먼저 생성된 원 신청은 승인하거나 다른 terminal 상태로 처리할 수 없다.
-- 확정된 신청을 신청자가 취소하는 정상 전이는 허용한다. 이 경우 action marker는 committed approve에서 pending/committed cancel로 전환되며 취소는 public cancellation 경로의 decision lock과 상태 검증을 모두 거친다.
-- lock은 처리 중 lease를 갱신한다. lease 소유권을 잃으면 추가 ShotGrid 레코드를 생성하지 않고 재시도를 안내한다.
-- 출퇴근 또는 휴가 write를 시작하기 직전 해당 기간 partition에 고유 generation 값을 가진 만료 없는 dirty marker를 설정하고 process memo를 무효화한다. ShotGrid mutation이 성공하거나 응답이 불명확하게 실패해도 refresh가 완료되기 전까지 dirty를 유지한다. reader는 dirty marker가 남아 있는 partition을 stale 정상 데이터로 반환하지 않고 오류로 처리한다. event/reconcile cache refresh는 조회 시작 시 generation을 캡처하고, Redis payload 저장 완료 뒤 marker가 같은 generation일 때만 원자적으로 삭제한다. 조회 도중 새 write가 발생해 generation이 바뀌면 dirty marker를 유지한다.
-- runtime reader는 기존 기간 partition payload key의 존재와 `list` 형식만 검사한다. 별도 coverage Redis key는 만들거나 요구하지 않는다.
-- reconcile은 record ID 비교 전에 dirty marker와 payload 형식을 검사한다. dirty 상태, payload 누락·형식 오류 중 하나라도 있으면 ID 집합이 같아도 강제로 전체 partition을 rebuild한다.
-
-#### 신청 및 승인 목록
-
-- 네비게이션 바의 `알림` 페이지에서 기존 `승인 요청` 영역의 이름을 `신청 및 승인 목록`으로 변경한다.
-- 신청자는 본인의 휴일근무 신청을 신청대상일, 신청사유, 현재 상태와 함께 조회한다.
-- 승인담당자는 자신에게 배정된 휴일근무 승인 대기 요청을 같은 목록에서 조회하고 승인 또는 반려할 수 있다.
-- 승인 대기 조회는 최근 3개월 및 향후 13개월의 Redis 출퇴근 partition을 모두 읽는다. 휴일근무 최대 신청 범위인 366일 이내 미래 partition도 포함하며, 필수 partition이 하나라도 없거나 dirty 상태이면 불완전한 목록을 반환하지 않고 오류로 중단한다. ShotGrid 직접 조회를 병합하지 않는다.
-- 승인 대기에서 request record에 `sg_approver`가 없으면 `sg:user` Redis cache의 요청자 `sg_part_supervisor`만 사용한다. `sg:user` cache, 요청자, 또는 `sg_part_supervisor` field가 누락되면 빈 승인 목록으로 숨기거나 ShotGrid를 조회하지 않고 오류로 중단한다.
-- 신청 상태는 원 신청의 자식 레코드를 기준으로 `승인 대기`, `승인`, `반려`, `취소`로 계산한다. `확정`이 있으면 `승인`, `반려`가 있으면 `반려`, `취소`가 있으면 `취소`, 처리 레코드가 없으면 `승인 대기`다.
-- 본인의 취소 가능한 신청에는 `신청 취소` action을 표시하고, 다른 사용자의 승인 대기 신청에만 `승인`과 `거절` action을 표시한다.
-
-### 4.9 승인 체계
+### 4.8 승인 체계
 
 #### 조직 구조와 ShotGrid 필드 매핑
 
 | 직급 | ShotGrid 필드 | 설명 |
 |------|--------------|------|
-| 팀원 | `sg_part_supervisor` = 실장 | 실장이 출근 정정, 야근 또는 휴일근무 신청을 승인 |
-| 팀장 | `sg_part_supervisor` = 실장 | 실장이 출근 정정, 야근 또는 휴일근무 신청을 승인 |
+| 팀원 | `sg_part_supervisor` = 실장 | 실장이 출근 정정 또는 야근 신청을 승인 |
+| 팀장 | `sg_part_supervisor` = 실장 | 실장이 출근 정정 또는 야근 신청을 승인 |
 | 실장 또는 supervisor 미지정자 | `sg_part_supervisor` = 비어있음 | 승인담당자 부재로 신청 직후 자동 승인/확정 |
 
 #### 승인 권한 판별
 
 출근 정정 승인 대기 뱃지 표시 여부는 **사전 판별 없이** `Attendance.get_pending_corrections()`를 호출하여 결과가 있으면 표시합니다. 야근 승인 대기는 `Attendance.get_pending_overtime_requests()`로 별도 조회합니다.
 
-department와 무관하게 요청자의 `sg_part_supervisor`에 등록된 첫 번째 HumanUser만 승인담당자로 사용합니다. `sg_part_supervisor`가 실제로 비어 있으면 승인담당자가 없는 정상 상태로 보고, 출근 정정, 연속근무, 야근, 휴일근무, 외근 신청은 생성 직후 `승인`과 `확정` 레코드를 자동 생성합니다. 이때 신청, 승인, 확정 레코드의 `sg_approver`는 비워 둡니다.
+department와 무관하게 요청자의 `sg_part_supervisor`에 등록된 첫 번째 HumanUser만 승인담당자로 사용합니다. `sg_part_supervisor`가 실제로 비어 있으면 승인담당자가 없는 정상 상태로 보고, 출근 정정, 연속근무, 야근, 외근 신청은 생성 직후 `승인`과 `확정` 레코드를 자동 생성합니다. 이때 신청, 승인, 확정 레코드의 `sg_approver`는 비워 둡니다.
 
-`sg_part_supervisor` 조회 실패, Redis cache 미생성 또는 `HumanUser` cache 레코드의 필드 누락은 승인담당자 없음으로 취급하지 않습니다. 이 경우 ShotGrid 조회로 fallback하지 않고 자동 확정도 수행하지 않으며 오류로 처리해야 합니다.
+`sg_part_supervisor` 조회 실패, Redis cache 미생성, ShotGrid 조회 실패, `HumanUser` 레코드의 필드 누락은 승인담당자 없음으로 취급하지 않습니다. 이 경우 자동 확정을 수행하지 않고 오류로 처리해야 합니다.
 
 #### 출근 정정 신청 조회 범위 (누구의 정정을 볼 수 있는가)
 
@@ -880,13 +788,13 @@ if correction_approver and correction_approver.get('id') == approver_id:
 | 팀장 | 요청자의 `sg_part_supervisor` | 요청자의 실장이 승인 |
 | 실장 또는 supervisor 미지정자 | 없음 | `sg_part_supervisor` 비어있음 → 신청 직후 자동 승인/확정 |
 
-### 4.10 불변성 규칙
+### 4.9 불변성 규칙
 
 - **모든 레코드는 생성 후 수정하지 않음**
 - 상태 변경은 새 레코드 생성으로 표현
 - 감사 추적이 데이터 구조 자체로 보장됨
 
-### 4.11 근태 미비 사유서
+### 4.10 근태 미비 사유서
 
 직전월에 근태 미비(출근 체크 누락, 근무시간 미충족, 직전 달 지각 5회 이상)가 있는 사용자는 당월 첫 근무일부터 사유서 작성 gate가 활성화되며, 사유서를 제출하면 미비 날짜별로 사유서 레코드를 생성한다.
 
@@ -936,14 +844,10 @@ if correction_approver and correction_approver.get('id') == approver_id:
 14. **외근 신청 parent**: `외근 / 신청`의 `sg_parent`는 실제 `출근 / 정상` 또는 실제 `퇴근 / 정상` 레코드를 가리킨다.
 15. **외근 확정 parent**: `외근 / 승인`과 `외근 / 확정`의 `sg_parent`는 최초 `외근 / 신청` 레코드를 가리킨다.
 16. **외근 terminal 상태**: `확정`, `반려`, `취소`는 해당 외근 요청을 처리 완료 상태로 만든다.
-17. **휴일근무 신청 상태**: 휴일근무는 `신청`, `승인`, `확정`, `반려`, `취소`만 사용하며 `정정신청`, `정상`, `포기`를 사용하지 않는다.
-18. **휴일근무 날짜 제한**: 신청대상일은 신청일 당일 또는 미래여야 하며 평일과 비근로일을 모두 허용한다.
-19. **휴일근무 parent**: 승인, 확정, 반려, 취소는 모두 원 `휴일근무 / 신청` 레코드를 parent로 가져야 한다.
-20. **휴일근무 중복 방지**: 같은 사용자와 신청대상일의 처리 중 또는 확정된 원 신청은 하나만 존재할 수 있다. 반려 또는 취소된 원 신청만 재신청할 수 있다.
-21. **신규 입사자 자동 출근 중복 방지**: 같은 `sg_user + sg_date + sg_type=출근` 조합에 유효한 확정 출근 레코드가 있으면 `입사자 자동 출근 처리` 레코드를 추가 생성하지 않는다.
-22. **신규 입사자 자동 출근 사유**: 자동 생성된 입사일 출근 레코드는 `sg_reason = "입사자 자동 출근 처리"`를 반드시 기록한다.
-23. **출근 정정 월 횟수 제한**: 사용자별 일반 `출근 / 정정신청` 중 해당 요청을 parent로 하는 `출근 / 승인` 레코드가 생성된 신청만 요청 `created_at`이 속한 달의 횟수에 포함하며 최대 3회로 제한한다. 승인 대기, 반려, 포기 신청은 횟수에 포함하지 않는다. 연속근무 워크플로우가 생성하여 `sg_reason`이 `연속근무로 인한 정상출근 인정`으로 시작하는 요청과 출근 이외 유형은 제한 대상이 아니며, 일반 출근 정정 신청에는 해당 접두사를 사용할 수 없다.
-24. **승인 후 동일 근무일 재신청 제한**: 같은 `sg_user + sg_date`의 일반 `출근 / 정정신청`을 parent로 하는 `출근 / 승인`이 하나라도 있으면 해당 근무일에는 새 출근 정정신청을 생성하지 않는다. 승인 대기, 반려, 포기 상태만 있으면 재신청할 수 있다.
+17. **신규 입사자 자동 출근 중복 방지**: 같은 `sg_user + sg_date + sg_type=출근` 조합에 유효한 확정 출근 레코드가 있으면 `입사자 자동 출근 처리` 레코드를 추가 생성하지 않는다.
+18. **신규 입사자 자동 출근 사유**: 자동 생성된 입사일 출근 레코드는 `sg_reason = "입사자 자동 출근 처리"`를 반드시 기록한다.
+19. **출근 정정 월 횟수 제한**: 사용자별 일반 `출근 / 정정신청` 중 해당 요청을 parent로 하는 `출근 / 승인` 레코드가 생성된 신청만 요청 `created_at`이 속한 달의 횟수에 포함하며 최대 3회로 제한한다. 승인 대기, 반려, 포기 신청은 횟수에 포함하지 않는다. 연속근무 워크플로우가 생성하여 `sg_reason`이 `연속근무로 인한 정상출근 인정`으로 시작하는 요청과 출근 이외 유형은 제한 대상이 아니며, 일반 출근 정정 신청에는 해당 접두사를 사용할 수 없다.
+20. **승인 후 동일 근무일 재신청 제한**: 같은 `sg_user + sg_date`의 일반 `출근 / 정정신청`을 parent로 하는 `출근 / 승인`이 하나라도 있으면 해당 근무일에는 새 출근 정정신청을 생성하지 않는다. 승인 대기, 반려, 포기 상태만 있으면 재신청할 수 있다.
 
 ### 5.2 마이그레이션 규칙 (완료)
 
@@ -966,13 +870,17 @@ if correction_approver and correction_approver.get('id') == approver_id:
 ```python
 def get_latest_confirmed_attendance(sg_user, sg_date, sg_type):
     """최신 정상 출퇴근 레코드를 최종 확정값으로 사용한다."""
-    summary = AttendanceQueryService().get_user_day(sg_user['id'], sg_date)
-    records = [
-        record for record in summary['attendance_records']
-        if record.get('sg_type') == sg_type
-        and record.get('sg_status') in ('정상', '확정')
-    ]
-    records.sort(key=lambda record: str(record.get('created_at') or ''), reverse=True)
+    records = sg.find(
+        'CustomNonProjectEntity10',
+        [
+            ['sg_user', 'is', sg_user],
+            ['sg_date', 'is', sg_date],
+            ['sg_type', 'is', sg_type],
+            ['sg_status', 'in', ['정상', '확정']],
+        ],
+        ['id', 'sg_time', 'created_at'],
+        order=[{'field_name': 'created_at', 'direction': 'desc'}],
+    )
     return records[0] if records else None
 ```
 
