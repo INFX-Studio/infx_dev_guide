@@ -820,8 +820,8 @@ R1: 야근 신청
 - 확정된 신청을 신청자가 취소하는 정상 전이는 허용한다. 이 경우 action marker는 committed approve에서 pending/committed cancel로 전환되며 취소는 public cancellation 경로의 decision lock과 상태 검증을 모두 거친다.
 - lock은 처리 중 lease를 갱신한다. lease 소유권을 잃으면 추가 ShotGrid 레코드를 생성하지 않고 재시도를 안내한다.
 - 출퇴근 또는 휴가 write를 시작하기 직전 해당 기간 partition에 고유 generation 값을 가진 만료 없는 dirty marker를 설정하고 process memo를 무효화한다. ShotGrid mutation이 성공하거나 응답이 불명확하게 실패해도 refresh가 완료되기 전까지 dirty를 유지한다. reader는 dirty marker가 남아 있는 partition을 stale 정상 데이터로 반환하지 않고 오류로 처리한다. event/reconcile cache refresh는 조회 시작 시 generation을 캡처하고, Redis payload 저장 완료 뒤 marker가 같은 generation일 때만 원자적으로 삭제한다. 조회 도중 새 write가 발생해 generation이 바뀌면 dirty marker를 유지한다.
-- 기간 partition cache는 전체 기간 ShotGrid 조회와 Redis payload 저장이 끝난 뒤에만 별도 coverage marker를 기록한다. runtime reader는 payload key 존재만으로 완전성을 추정하지 않고 coverage marker를 함께 요구하며, marker가 없는 과거·부분·중단 rebuild payload는 오류로 거부한다.
-- reconcile은 record ID 비교 전에 dirty marker, coverage marker, payload 형식을 검사한다. dirty 상태, coverage 누락, payload 누락·형식 오류 중 하나라도 있으면 ID 집합이 같아도 강제로 전체 partition을 rebuild한다.
+- runtime reader는 기존 기간 partition payload key의 존재와 `list` 형식만 검사한다. 별도 coverage Redis key는 만들거나 요구하지 않는다.
+- reconcile은 record ID 비교 전에 dirty marker와 payload 형식을 검사한다. dirty 상태, payload 누락·형식 오류 중 하나라도 있으면 ID 집합이 같아도 강제로 전체 partition을 rebuild한다.
 
 #### 신청 및 승인 목록
 
