@@ -53,7 +53,7 @@
 | `sg_user` | 사용자 | entity(HumanUser) | O | 출퇴근 대상자 또는 신청자 |
 | `sg_approver` | 승인담당자 | entity(HumanUser) | - | 승인해야 할 담당자 또는 실제 처리자. 승인담당자가 없는 자동 확정 레코드는 비워 둔다. |
 | `sg_date` | 근무일 | date | O | 출퇴근 날짜 |
-| `sg_type` | 구분 | list | O | `출근`, `퇴근`, `석식`, `중식`, `야근`, `외근`, `사유서` |
+| `sg_type` | 구분 | list | O | `출근`, `퇴근`, `석식`, `중식`, `야근`, `외근`, `사유서`, `휴일근무` |
 | `sg_status` | 상태 | list | - | `정상`, `신청`, `정정신청`, `승인`, `확정`, `반려`, `포기`, `취소` |
 | `sg_time` | 시간 | date_time | - | 출퇴근 시간 또는 정정 희망 시간 |
 | `sg_parent` | Parent | entity(Self) | - | 연결 대상 레코드 |
@@ -70,6 +70,7 @@
 | 야근 승인/확정/반려/포기 | 원 요청의 예상 퇴근 시간 |
 | 외근 후 출근 신청/승인/확정/반려/취소 | 외근 시작 인정 시간. 기본 규칙에서는 당일 `10:00:00` |
 | 외근 후 퇴근 신청/승인/확정/반려/취소 | 외근 종료 인정 시간. 실제 출근, 휴가, 점심 제외 기준으로 정상근무 8시간을 충족하는 시각 |
+| 휴일근무 신청/승인/확정/반려/포기/취소 | null (의미 없음) |
 | 출근 승인/반려/포기 | null (의미 없음) |
 | 사유서 확정 | null (의미 없음) |
 
@@ -79,8 +80,11 @@
 |---------------|----------------|----------------|
 | 확정 출퇴근 | 대상 직원 (본인) | 없음 |
 | 정정 신청 | 대상 직원 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
-| 승인/반려 | 대상 직원 (본인) | 실제 처리자. 승인담당자 부재 자동 승인/확정은 없음 |
+| 승인/반려 | 대상 직원 (본인) | 실제 처리자. 승인담당자 부재로 자동 생성한 승인/확정 레코드는 비워 둔다. |
 | 외근 신청 | 대상 직원 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
+| 휴일근무 신청 | 신청자 (본인) | 승인담당자. `sg_part_supervisor`가 비어 있으면 없음 |
+| 휴일근무 승인/확정/반려 | 신청자 (본인) | 실제 처리자. 승인담당자 부재로 자동 생성한 승인/확정 레코드는 비워 둔다. |
+| 휴일근무 포기/취소 | 신청자 (본인) | 신청자 본인 |
 | 석식/중식 포기 | 대상 직원 (본인) | 없음 |
 | 근태 미비 사유서 | 대상 직원 (본인) | 없음 |
 ### 2.6 시스템 필드 활용
@@ -117,7 +121,7 @@
 
 #### sg_type
 
-`외근`은 코드 배포 전에 ShotGrid `sg_type` list 값으로 먼저 추가해야 한다. 배포 전에 값이 없으면 `외근 / 신청` 업로드가 실패할 수 있다.
+`외근`과 `휴일근무`는 코드 배포 전에 ShotGrid `sg_type` list 값으로 먼저 추가해야 한다. 배포 전에 값이 없으면 해당 신청 업로드가 실패할 수 있다.
 
 | Code | Display Name | 설명 |
 |------|--------------|------|
@@ -128,19 +132,20 @@
 | `야근` | 야근 | 야근 신청 워크플로우 레코드 |
 | `외근` | 외근 | 외근 후 출근/외근 후 퇴근 승인 워크플로우 레코드 |
 | `사유서` | 사유서 | 지난 달 근태 미비 사유서 레코드 |
+| `휴일근무` | 휴일근무 | 휴일근무 신청 워크플로우 레코드 |
 
 #### sg_status
 
 | Code | Display Name | 설명 |
 |------|--------------|------|
 | `정상` | 정상 | 확정된 출근/퇴근 기록 |
-| `신청` | 신청 | 최초 야근 또는 외근 신청 |
+| `신청` | 신청 | 최초 야근, 외근 또는 휴일근무 신청 |
 | `정정신청` | 정정신청 | 출근 정정 신청 |
-| `승인` | 승인 | 출근 정정 승인, 야근 승인 또는 외근 승인 |
-| `확정` | 확정 | 출근 정정 승인 후 확정, 야근 확정, 외근 확정 또는 근태 미비 사유서 확정 |
-| `반려` | 반려 | 출근 정정 반려, 야근 반려 또는 외근 반려 |
-| `포기` | 포기 | 출근 정정 반려 후 포기, 석식/중식 포기, 야근 신청 포기 |
-| `취소` | 취소 | 퇴근 취소, 기존 야근 취소 또는 외근 취소 레코드 |
+| `승인` | 승인 | 출근 정정 승인, 야근 승인, 외근 승인 또는 휴일근무 승인 |
+| `확정` | 확정 | 출근 정정 승인 후 확정, 야근 확정, 외근 확정, 휴일근무 확정 또는 근태 미비 사유서 확정 |
+| `반려` | 반려 | 출근 정정 반려, 야근 반려, 외근 반려 또는 휴일근무 반려 |
+| `포기` | 포기 | 출근 정정 반려 후 포기, 석식/중식 포기, 야근 신청 포기 또는 휴일근무 신청 포기 |
+| `취소` | 취소 | 퇴근 취소, 기존 야근 취소, 외근 취소 또는 휴일근무 신청 취소 레코드 |
 
 ### 2.8 레코드 종류 (sg_type + sg_status 조합)
 
@@ -168,6 +173,12 @@
 | 반려 | 외근 | 외근 신청 반려 | 반려한 외근 신청 레코드 |
 | 취소 | 외근 | 외근 신청/승인/확정 취소 | 취소 대상 외근 레코드 |
 | 확정 | 사유서 | 지난 달 근태 미비 사유서 | - |
+| 신청 | 휴일근무 | 최초 신청 또는 반려/취소 후 재신청 | 최초 신청은 -, 재신청은 직전 휴일근무 신청 레코드 |
+| 승인 | 휴일근무 | 휴일근무 신청 승인 | 승인한 휴일근무 신청 레코드 |
+| 확정 | 휴일근무 | 휴일근무 승인 확정 | 승인한 휴일근무 신청 레코드 |
+| 반려 | 휴일근무 | 휴일근무 신청 반려 | 반려한 휴일근무 신청 레코드 |
+| 포기 | 휴일근무 | 휴일근무 신청 포기 | 포기한 휴일근무 신청 레코드 |
+| 취소 | 휴일근무 | 대상 날짜 전 휴일근무 신청 취소 | 취소한 휴일근무 신청 레코드 |
 
 ### 2.9 Code 규칙
 
@@ -188,6 +199,7 @@
 - `홍길동_20260305_외근_신청_103000` — 외근 신청
 - `홍길동_20260305_외근_확정_110000` — 외근 확정
 - `홍길동_20260305_사유서_확정_093000` — 지난 달 근태 미비 사유서
+- `홍길동_20260307_휴일근무_신청_103000` — 휴일근무 신청
 
 ---
 
@@ -747,15 +759,15 @@ R1: 야근 신청
 
 | 직급 | ShotGrid 필드 | 설명 |
 |------|--------------|------|
-| 팀원 | `sg_part_supervisor` = 실장 | 실장이 출근 정정 또는 야근 신청을 승인 |
-| 팀장 | `sg_part_supervisor` = 실장 | 실장이 출근 정정 또는 야근 신청을 승인 |
+| 팀원 | `sg_part_supervisor` = 실장 | 실장이 출근 정정, 야근 또는 휴일근무 신청을 승인 |
+| 팀장 | `sg_part_supervisor` = 실장 | 실장이 출근 정정, 야근 또는 휴일근무 신청을 승인 |
 | 실장 또는 supervisor 미지정자 | `sg_part_supervisor` = 비어있음 | 승인담당자 부재로 신청 직후 자동 승인/확정 |
 
 #### 승인 권한 판별
 
 출근 정정 승인 대기 뱃지 표시 여부는 **사전 판별 없이** `Attendance.get_pending_corrections()`를 호출하여 결과가 있으면 표시합니다. 야근 승인 대기는 `Attendance.get_pending_overtime_requests()`로 별도 조회합니다.
 
-department와 무관하게 요청자의 `sg_part_supervisor`에 등록된 첫 번째 HumanUser만 승인담당자로 사용합니다. `sg_part_supervisor`가 실제로 비어 있으면 승인담당자가 없는 정상 상태로 보고, 출근 정정, 연속근무, 야근, 외근 신청은 생성 직후 `승인`과 `확정` 레코드를 자동 생성합니다. 이때 신청, 승인, 확정 레코드의 `sg_approver`는 비워 둡니다.
+department와 무관하게 요청자의 `sg_part_supervisor`에 등록된 첫 번째 HumanUser만 승인담당자로 사용합니다. `sg_part_supervisor`가 실제로 비어 있으면 승인담당자가 없는 정상 상태로 보고, 출근 정정, 연속근무, 야근, 외근, 휴일근무 신청은 생성 직후 `승인`과 `확정` 레코드를 자동 생성합니다. 이때 신청, 승인, 확정 레코드의 `sg_approver`는 비워 둡니다.
 
 `sg_part_supervisor` 조회 실패, Redis cache 미생성, ShotGrid 조회 실패, `HumanUser` 레코드의 필드 누락은 승인담당자 없음으로 취급하지 않습니다. 이 경우 자동 확정을 수행하지 않고 오류로 처리해야 합니다.
 
@@ -822,6 +834,102 @@ if correction_approver and correction_approver.get('id') == approver_id:
 
 `사유서`는 코드 배포 전에 ShotGrid `sg_type` list 값으로 먼저 추가해야 한다. 배포 전에 값이 없으면 `사유서 / 확정` 업로드가 실패할 수 있다.
 
+### 4.11 휴일근무 신청
+
+휴일근무 신청은 기존 출퇴근 기록 엔티티 `CustomNonProjectEntity10`과 `sg_type = 휴일근무`를 사용하는 완전 불변 create-only event workflow다. 별도 Holiday entity, cache, index 또는 event plugin을 만들지 않는다.
+
+#### 신청 범위와 입력 검증
+
+- 날짜 계산 timezone은 `Asia/Seoul`이다.
+- 신청 가능일은 신청 시점 기준 내일부터 다음 달 말일까지의 토요일, 일요일, 공휴일이다.
+- 한 요청에는 정규화, 중복 제거, 오름차순 정렬된 날짜를 1~10개 포함한다.
+- 같은 `sg_user + sg_date`에 활성 신청이 있으면 중복 신청할 수 없다.
+- 반려 또는 취소로 종료된 신청은 재신청할 수 있다.
+- 포기로 종료된 신청은 재신청할 수 없다.
+- 날짜별 신청 사유는 필수이며 최대 20,000 Unicode code point다. 20,000 code point는 허용하고 20,001 code point는 거부한다.
+- Browser의 사유 길이 계산은 UTF-16 code unit 수가 아니라 `Array.from(reason).length`를 사용한다.
+- Request-level validation에 실패하면 첫 ShotGrid write 전에 전체 요청을 거부한다.
+
+#### 레코드 공통 형식
+
+| 필드 | 값 |
+|------|-----|
+| `sg_type` | `휴일근무` |
+| `sg_date` | 신청 대상 근무일 |
+| `sg_user` | 신청자 |
+| `sg_approver` | 신청은 확정된 승인담당자, 승인/확정/반려는 실제 처리자, 포기/취소는 신청자 |
+| `sg_reason` | 날짜별 신청 사유 또는 해당 처리 사유 |
+| `sg_time` | null |
+| `code` | `{이름}_{YYYYMMDD}_휴일근무_{상태}_{HHMMSS}` |
+
+요청자의 `sg_part_supervisor`가 비어 있으면 신청 생성 직후 `휴일근무 / 승인`과 `휴일근무 / 확정`을 자동 생성한다. 자동 생성된 승인/확정 레코드의 `sg_approver`는 비워 둔다. Supervisor 또는 cache 조회 실패는 승인담당자 없음으로 취급하지 않고 fail-closed한다.
+
+#### Lifecycle과 sg_parent
+
+| Event | `sg_status` | `sg_parent` | 설명 |
+|------|-------------|-------------|------|
+| 최초 신청 R1 | `신청` | - | 최초 신청 |
+| 승인 D1 | `승인` | R1 | R1 승인 |
+| 확정 C1 | `확정` | R1 | R1 승인 확정 |
+| 반려 J1 | `반려` | R1 | R1 반려 |
+| 포기 A1 | `포기` | R1 | R1 포기 |
+| 취소 X1 | `취소` | R1 | 대상 날짜 전 R1 취소 |
+| 반려 후 재신청 R2 | `신청` | R1 | 직전 반려된 신청 R1을 parent로 재신청 |
+| 취소 후 재신청 R2 | `신청` | R1 | 직전 취소된 신청 R1을 parent로 재신청 |
+
+승인과 확정은 서로를 parent로 연결하지 않고 둘 다 처리 대상 신청을 직접 parent로 사용한다. 반려, 포기, 취소도 처리 대상 신청을 직접 parent로 사용한다. `포기`와 `취소`는 서로 다른 terminal state다. 취소는 대상 날짜 전에 사용자가 신청을 철회한 상태이며, 포기는 해당 신청 workflow를 포기한 상태다.
+
+날짜별 신청 상태는 해당 `휴일근무 / 신청`을 직접 parent로 하는 처리 레코드를 `created_at`, `id` 오름차순으로 정렬한 뒤 마지막 상태로 판정한다.
+
+| 마지막 처리 상태 | 날짜별 상태 | 재신청 |
+|-----------------|-------------|--------|
+| 처리 레코드 없음 | 승인 대기 | 불가 |
+| `승인` 또는 `확정` | 승인됨 | 불가 |
+| `반려` | 반려됨 | 가능 |
+| `취소` | 취소됨 | 가능 |
+| `포기` | 포기됨 | 불가 |
+
+중복 신청 검사에서는 승인 대기, 승인됨, 포기됨 상태를 새 신청 차단 상태로 취급한다. 반려됨 또는 취소됨 상태만 새 신청을 허용하며, 새 신청은 직전 신청을 parent로 사용한다.
+
+#### 인증과 권한
+
+- 모든 Holiday Work endpoint는 인증, server-side feature flag 및 CSRF 보호를 적용한다.
+- 신청의 `sg_user`는 request body 값이 아니라 인증된 실제 사용자로 강제한다.
+- 신청자 본인만 자신의 신청을 조회하고 포기, 취소 또는 재신청할 수 있다.
+- 승인과 반려는 신청자의 현재 `sg_part_supervisor`를 server-side Redis user cache에서 resolve한 실제 승인담당자만 수행할 수 있다.
+- 신청자 본인의 self-approval과 self-rejection은 금지한다.
+- 승인 또는 반려 처리 시 authenticated user가 신청 record의 `sg_approver` 및 현재 server-side로 resolve한 승인담당자와 모두 일치하는지 검증한다. 불일치하거나 cache를 확인할 수 없으면 fail-closed한다.
+- 신청함 조회는 인증된 사용자의 `sg_user` record로 제한하고, 승인 요청 조회는 현재 사용자가 실제 승인담당자인 request로 제한한다.
+- Client가 전달한 record ID는 그대로 신뢰하지 않는다. 처리 전에 parent record의 entity type, `sg_type`, `sg_date`, `sg_user`, `sg_approver`, 현재 lifecycle state 및 action 가능 여부를 기존 monthly attendance partition에서 다시 검증한다.
+- 포기, 취소, 재신청은 parent의 `sg_user`가 인증된 사용자와 일치해야 한다. 승인과 반려는 parent의 실제 승인담당자가 인증된 사용자와 일치해야 한다.
+- `sg_reason`은 plain text로만 취급한다. HTML 출력에서는 context-aware escaping을 적용하고 raw HTML, `innerHTML`, `safe` 또는 `Markup` 우회를 사용하지 않는다.
+
+#### 복수 날짜 처리
+
+- 모든 날짜의 request-level validation과 필요한 monthly attendance partition의 key, schema, freshness 확인을 첫 write 전에 완료한다.
+- Same-month 요청은 해당 monthly attendance partition을 최대 한 번 읽는다.
+- Cross-month 요청은 필요한 각 monthly attendance partition을 최대 한 번씩 읽는다.
+- 필요한 partition 중 하나라도 missing, invalid, stale 또는 unavailable이면 ShotGrid read와 create 없이 전체 요청을 fail-closed한다.
+- Write 시작 후 확정적으로 실패한 날짜는 `failed_dates`, write 결과가 불명확한 날짜는 `pending_dates`, 성공한 날짜는 `succeeded_dates`로 반환한다.
+- 확정적으로 실패한 날짜가 발생해도 나머지 날짜 처리를 계속한다.
+- 결과가 불명확한 날짜는 reconciliation이 완료되기 전까지 retry하거나 다시 생성하지 않는다.
+- Partial success를 보상하기 위해 성공한 레코드를 취소하거나 삭제하지 않는다.
+- User/date lock은 날짜 오름차순으로 획득하고 idempotency marker로 같은 사용자/날짜의 활성 신청을 최대 한 건으로 제한한다.
+
+#### Cache와 Web 경계
+
+- 모든 Web request, API, polling, middleware 및 일반 background read는 기존 Flova Redis monthly attendance partition만 사용한다.
+- Cache miss, invalid payload, stale partition, timeout 또는 Redis 장애에서 ShotGrid read fallback, read-through cache, request-time rebuild를 수행하지 않는다.
+- Holiday 전용 cache, index, event plugin을 추가하지 않는다.
+- 기존 ShotGrid Event Framework Attendance plugin은 `CustomNonProjectEntity10`의 `New`, `Change`, `Revival` event에서 영향받은 `sg_date` 월을 중복 제거한 뒤 월별 한 번씩 rebuild한다. 같은 월 event burst는 해당 월 cache query 한 번으로 합치고, 날짜가 다른 월로 변경되면 이전 월과 새 월을 각각 한 번씩 rebuild한다.
+- ValiDuck은 30분마다 기존 historical reconcile과 별도의 Attendance rolling reconcile을 실행한다.
+- Attendance rolling 범위는 실행 시점의 Asia/Seoul 기준 current, next, next-next 3개월이다. 월 전환 시 이 범위를 다시 계산한다.
+- Rolling reconcile은 ShotGrid와 Redis ID 집합을 비교하고, Redis key가 missing이거나 ID가 다를 때만 해당 월을 rebuild한다. 레코드가 없는 월도 missing key가 아니라 실제 list payload `[]`로 유지한다.
+- Rolling 대상 3개월의 ShotGrid ID 조회와 rebuild 대상 월의 full payload 조회가 모두 성공한 뒤 Redis transaction으로 한 번에 publish한다. 조회 또는 publish 실패 시 일부 월만 갱신하지 않는다.
+- 기존 Web process의 monthly attendance memo TTL 45초를 변경하지 않는다. Event Framework 또는 ValiDuck 같은 외부 process의 publish 결과는 Web process에서 최대 45초 안에 반영되며, 같은 process에서 실행한 save/publish만 listener로 즉시 memo를 무효화한다.
+- `휴일근무 신청함`과 `휴일근무 승인 요청`은 `/attendance/list`에서 사용자가 명시적으로 열 때만 조회한다.
+- Notification page, navbar count, page-load request, background polling 및 generic pending behavior에는 Holiday Work를 연결하지 않는다.
+
 ---
 
 ## 5. 무결성 규칙
@@ -848,6 +956,16 @@ if correction_approver and correction_approver.get('id') == approver_id:
 18. **신규 입사자 자동 출근 사유**: 자동 생성된 입사일 출근 레코드는 `sg_reason = "입사자 자동 출근 처리"`를 반드시 기록한다.
 19. **출근 정정 월 횟수 제한**: 사용자별 일반 `출근 / 정정신청` 중 해당 요청을 parent로 하는 `출근 / 승인` 레코드가 생성된 신청만 요청 `created_at`이 속한 달의 횟수에 포함하며 최대 3회로 제한한다. 승인 대기, 반려, 포기 신청은 횟수에 포함하지 않는다. 연속근무 워크플로우가 생성하여 `sg_reason`이 `연속근무로 인한 정상출근 인정`으로 시작하는 요청과 출근 이외 유형은 제한 대상이 아니며, 일반 출근 정정 신청에는 해당 접두사를 사용할 수 없다.
 20. **승인 후 동일 근무일 재신청 제한**: 같은 `sg_user + sg_date`의 일반 `출근 / 정정신청`을 parent로 하는 `출근 / 승인`이 하나라도 있으면 해당 근무일에는 새 출근 정정신청을 생성하지 않는다. 승인 대기, 반려, 포기 상태만 있으면 재신청할 수 있다.
+21. **휴일근무 상태 제한**: 휴일근무는 `신청`, `승인`, `확정`, `반려`, `포기`, `취소`만 사용하며 `정상`과 `정정신청`을 사용하지 않는다.
+22. **휴일근무 시간**: 모든 휴일근무 레코드의 `sg_time`은 null이다.
+23. **휴일근무 처리 parent**: `승인`, `확정`, `반려`, `포기`, `취소`는 처리 대상 `휴일근무 / 신청`을 직접 parent로 사용한다.
+24. **휴일근무 재신청 parent**: 반려 또는 취소 후 재신청한 `휴일근무 / 신청`은 직전 `휴일근무 / 신청`을 parent로 사용한다.
+25. **휴일근무 중복 방지**: 같은 `sg_user + sg_date`의 승인 대기, 승인됨 또는 포기됨 상태에서 새 신청을 생성하지 않는다. 반려됨 또는 취소됨 상태만 재신청을 허용한다.
+26. **휴일근무 요청 원자적 선검증**: 날짜, 사유, 중복 및 필요한 monthly attendance partition을 첫 write 전에 모두 검증한다.
+27. **휴일근무 불명확 결과**: Write 결과가 불명확한 날짜는 reconciliation 전까지 retry하거나 재생성하지 않는다.
+28. **휴일근무 partial success 보존**: 복수 날짜 중 성공한 레코드를 다른 날짜의 실패 보상 목적으로 취소하거나 삭제하지 않는다.
+29. **휴일근무 server-side 권한 검증**: 신청자는 인증된 실제 사용자로 강제하고, 승인/반려는 현재 실제 승인담당자만, 포기/취소/재신청은 parent 신청의 소유자만 수행한다.
+30. **휴일근무 출력 안전성**: 사용자 입력 `sg_reason`은 plain text로 저장·표시하고 HTML context에 맞게 escape한다.
 
 ### 5.2 마이그레이션 규칙 (완료)
 
