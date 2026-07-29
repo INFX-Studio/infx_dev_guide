@@ -556,6 +556,31 @@ has_comp_time_off = work_minutes >= 420분
 can_claim_lunch_cost = work_minutes >= 480분
 ```
 
+#### INFX Works Desktop 유휴 상태 표시
+
+INFX Works Desktop을 사용하는 평일 근무자의 키보드와 마우스 입력이 일정 시간 없으면 오늘 일 단위 출퇴근 리스트의 `근무중` 또는 `야근중` 상태뱃지 안에 있는 live animation indicator를 정적인 `Zzz...` indicator로 바꾸어 표시합니다.
+
+- 적용 대상은 평일 근무일에 유효한 출근 기록이 있고 퇴근 기록이 없는 사용자입니다.
+- 기본 감지 시작 시각은 지각 여부와 Attendance Rule의 기준 퇴근 시각에 관계없이 `19:00`입니다.
+- 해당 근무일에 `오후반차`가 있으면 감지 시작 시각은 `15:00`입니다.
+- 해당 근무일에 `오후2반반차`가 있으면 감지 시작 시각은 `17:00`입니다.
+- 해당 근무일에 `오후1반반차`와 `오후2반반차`가 함께 있으면 `오후반차`와 동일하게 `15:00`부터 감지합니다.
+- 오전반차, 오전1반반차, 오전2반반차, 오후1반반차 등 그 밖의 부분 휴가는 기본 감지 시작 시각 `19:00`을 유지합니다.
+- 토요일, 일요일, 공휴일의 휴일근무는 유효한 출근 기록이 있어도 유휴 상태를 감지하거나 표시하지 않습니다.
+- Electron main process는 운영체제가 계산한 system idle time만 5분 간격으로 확인합니다. 입력한 key, mouse 좌표, 실행 프로그램, window title은 수집하지 않습니다.
+- 감지 시작 시각 전의 system idle time은 유휴시간에 포함하지 않습니다. 예를 들어 `18:50`부터 입력이 없어도 `19:00`에는 `근무중`으로 표시하고, `19:00` 이후에도 입력이 없으면 `19:05`부터 `Zzz...(5min)`으로 표시합니다.
+- system idle time이 5분 이상이면 live animation 대신 흰색 배경과 검은색 border의 정적인 `Zzz...(<duration>)` indicator를 표시합니다. 기존 `근무중` 문구 또는 `야근중` 문구와 야근시간은 그대로 유지합니다.
+- 유휴시간은 5분 단위로 내림하여 표시합니다. 5분은 `Zzz...(5min)`, 65분은 `Zzz...(1h 5min)`으로 표시합니다.
+- 감지 종료 시각은 두지 않습니다. 사용자의 입력이 재개될 때까지 유휴시간 표시를 계속 갱신합니다.
+- 사용자의 키보드 또는 마우스 입력이 재개되면 유휴 상태를 해제하고 기존 `근무중` 상태뱃지와 animation으로 복구합니다.
+- 화면 잠금 해제, 절전 복귀 또는 network 재연결 후 첫 sample에서는 복귀 전 누적 system idle time을 사용하지 않습니다. 첫 sample은 유휴 상태를 초기화하여 `근무중`으로 표시하고 이후 새 유휴시간만 추적합니다.
+- 사용자가 새로 출근하면 이전 유휴 상태를 제거하고 새 근무 session 기준으로 추적합니다.
+- 유휴 상태는 현재 출퇴근 리스트를 볼 수 있는 모든 사용자에게 동일하게 표시합니다.
+- 유휴 상태는 ShotGrid 출퇴근 레코드가 아닌 별도 TTL Redis presence key에 저장합니다. 기존 `sg:attendance:*`와 `web-snapshot:*` payload는 변경하지 않습니다.
+- Redis presence key가 없거나 TTL이 만료되었으면 유휴 상태가 아닌 것으로 판단하여 기존 `근무중`으로 표시합니다. Cache miss를 오류로 응답하지 않습니다.
+- Redis 연결 실패 또는 payload 손상 시 원인을 기록하고 기존 `근무중`으로 표시합니다. 이때 ShotGrid read fallback을 수행하지 않습니다.
+- 유휴 상태만으로 자동 퇴근 또는 `퇴근 미체크` 레코드를 생성하지 않습니다. 기존의 다음 날 퇴근 미체크 처리 규칙은 그대로 유지합니다.
+
 ### 4.2 퇴근 처리
 
 #### 익일 10시 전날 퇴근 cutoff
@@ -863,6 +888,8 @@ if correction_approver and correction_approver.get('id') == approver_id:
 | `code` | `{이름}_{YYYYMMDD}_휴일근무_{상태}_{HHMMSS}` |
 
 요청자의 `sg_part_supervisor`가 비어 있으면 신청 생성 직후 `휴일근무 / 승인`과 `휴일근무 / 확정`을 자동 생성한다. 자동 생성된 승인/확정 레코드의 `sg_approver`는 비워 둔다. Supervisor 또는 cache 조회 실패는 승인담당자 없음으로 취급하지 않고 fail-closed한다.
+`sg_part_supervisor`가 비어 있지 않으면 첫 번째 값은 유효한 `HumanUser` link여야 한다. Null, 빈 mapping, 다른 entity type, 유효하지 않은 ID 또는 신청자 본인을 가리키는 값은 승인자 부재로 간주하지 않고 첫 write 전에 fail-closed한다.
+승인자 없는 자동 승인에서 신청 생성 후 승인 또는 확정 생성이 완료되지 않으면 해당 날짜를 성공이나 재신청 가능한 확정 실패로 처리하지 않는다. 생성된 신청을 유지한 채 `pending_dates`로 반환하고, cache reconciliation 후 동일 신청 record를 사용하여 누락된 승인/확정만 복구한다. 새 신청 record를 생성해서는 안 된다.
 
 #### Lifecycle과 sg_parent
 
@@ -884,7 +911,8 @@ if correction_approver and correction_approver.get('id') == approver_id:
 | 마지막 처리 상태 | 날짜별 상태 | 재신청 |
 |-----------------|-------------|--------|
 | 처리 레코드 없음 | 승인 대기 | 불가 |
-| `승인` 또는 `확정` | 승인됨 | 불가 |
+| `승인` | 확정 복구 중 | 불가 |
+| `확정` | 승인됨 | 불가 |
 | `반려` | 반려됨 | 가능 |
 | `취소` | 취소됨 | 가능 |
 | `포기` | 포기됨 | 불가 |
@@ -921,14 +949,34 @@ if correction_approver and correction_approver.get('id') == approver_id:
 - 모든 Web request, API, polling, middleware 및 일반 background read는 기존 Flova Redis monthly attendance partition만 사용한다.
 - Cache miss, invalid payload, stale partition, timeout 또는 Redis 장애에서 ShotGrid read fallback, read-through cache, request-time rebuild를 수행하지 않는다.
 - Holiday 전용 cache, index, event plugin을 추가하지 않는다.
+- 기존 Attendance list payload key `sg:attendance:{YYYY-MM}`는 변경하지 않는다. Partition 검증용 공용 metadata는 companion key `sg:attendance:{YYYY-MM}:meta`에 저장한다.
+- Attendance metadata에는 partition key, 대상 월, schema version, 필수 field 목록과 마지막 ShotGrid 검증 시각을 저장한다. List payload와 metadata를 생성하거나 rebuild할 때는 하나의 Redis transaction으로 publish한다.
+- Holiday Work write 판단에서는 월별 list payload와 metadata를 Redis MGET 한 번으로 읽는다. Metadata가 없거나 대상 월·schema·필수 field가 일치하지 않거나 마지막 검증 후 40분이 지나면 해당 partition을 stale 또는 invalid로 처리하고 fail-closed한다.
+- 기존 Attendance reader의 payload 계약은 유지한다. Holiday Work flag를 활성화하기 전에 Attendance rolling reconcile을 한 번 성공시켜 current, next, next-next 3개월의 metadata를 준비한다.
 - 기존 ShotGrid Event Framework Attendance plugin은 `CustomNonProjectEntity10`의 `New`, `Change`, `Revival` event에서 영향받은 `sg_date` 월을 중복 제거한 뒤 월별 한 번씩 rebuild한다. 같은 월 event burst는 해당 월 cache query 한 번으로 합치고, 날짜가 다른 월로 변경되면 이전 월과 새 월을 각각 한 번씩 rebuild한다.
 - ValiDuck은 30분마다 기존 historical reconcile과 별도의 Attendance rolling reconcile을 실행한다.
+- Historical reconcile이 실패해도 같은 주기의 Attendance rolling reconcile을 실행하며, Attendance rolling 실패도 historical 결과를 되돌리지 않는다. 두 작업의 오류는 각각 기록하고 둘 다 시도한 뒤 해당 주기를 실패로 보고한다.
 - Attendance rolling 범위는 실행 시점의 Asia/Seoul 기준 current, next, next-next 3개월이다. 월 전환 시 이 범위를 다시 계산한다.
 - Rolling reconcile은 ShotGrid와 Redis ID 집합을 비교하고, Redis key가 missing이거나 ID가 다를 때만 해당 월을 rebuild한다. 레코드가 없는 월도 missing key가 아니라 실제 list payload `[]`로 유지한다.
 - Rolling 대상 3개월의 ShotGrid ID 조회와 rebuild 대상 월의 full payload 조회가 모두 성공한 뒤 Redis transaction으로 한 번에 publish한다. 조회 또는 publish 실패 시 일부 월만 갱신하지 않는다.
+- Rolling 대상 3개월의 ShotGrid ID 조회가 모두 성공하면 payload rebuild 여부와 관계없이 같은 transaction에서 각 partition metadata의 마지막 검증 시각을 갱신한다.
 - 기존 Web process의 monthly attendance memo TTL 45초를 변경하지 않는다. Event Framework 또는 ValiDuck 같은 외부 process의 publish 결과는 Web process에서 최대 45초 안에 반영되며, 같은 process에서 실행한 save/publish만 listener로 즉시 memo를 무효화한다.
 - `휴일근무 신청함`과 `휴일근무 승인 요청`은 `/attendance/list`에서 사용자가 명시적으로 열 때만 조회한다.
+- 공통 네비게이션 바의 오늘 날짜를 선택하면 동작 메뉴를 표시한다. `휴일 근무 신청` 메뉴에서 다가오는 신청 가능 휴일을 월별 캘린더로 보여 주는 휴일근무 modal을 열며, 출퇴근 페이지 날짜 dropdown이나 화면 하단의 별도 고정 진입 버튼은 사용하지 않는다.
 - Notification page, navbar count, page-load request, background polling 및 generic pending behavior에는 Holiday Work를 연결하지 않는다.
+
+#### Web endpoint와 feature flag
+
+| 구분 | 경로 |
+|------|------|
+| 신청함·승인 요청·신청 가능일 조회 | `GET /api/attendance/holiday-work` |
+| Single-date·batch 신청 | `POST /api/attendance/holiday-work/requests` |
+| 승인·반려·취소·포기 | `POST /api/attendance/holiday-work/actions` |
+
+- Provider `ATTENDANCE_HOLIDAY_WORK_PROVIDER_ENABLED`와 Web consumer `ATTENDANCE_HOLIDAY_WORK_WEB_ENABLED`는 환경변수가 없어도 기본 활성화한다. 명시적으로 false 또는 0을 지정한 경우에만 비활성화한다.
+- 2~10일 batch는 `ATTENDANCE_HOLIDAY_WORK_BATCH_ENABLED`, cross-month 선택은 `ATTENDANCE_HOLIDAY_WORK_CROSS_MONTH_ENABLED`로 단계적으로 활성화한다.
+- Web consumer flag가 꺼져 있으면 `/attendance/list`에 휴일근무 진입점을 표시하지 않고 endpoint도 fail-closed한다.
+- Cross-month flag가 꺼져 있어도 single-date와 same-month 동작은 유지한다.
 
 ---
 
