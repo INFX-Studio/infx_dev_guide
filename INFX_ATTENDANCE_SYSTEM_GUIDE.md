@@ -26,6 +26,29 @@
 
 `flova.timelog.attendance` 모듈 안에서 상수를 사용할 때도 반드시 클래스를 이용한다. 해당 상수에 가장 잘 어울리는 클래스를 만들고, 클래스 멤버로 정의하여 사용한다.
 
+### 1.4 데이터 원천 원칙 (Cache 우선과 예외)
+
+출퇴근 시스템의 데이터 원천은 아래 원칙을 따릅니다. 이 원칙은 이 문서의 다른 절이 정한 개별 규칙보다 상위 원칙이며, 개별 절의 규칙은 이 원칙을 구체화한 것으로 해석합니다.
+
+#### 기본 원칙 (Cache 우선, fallback 금지)
+
+- 모든 Web request, API, polling, middleware 및 일반 background read는 Flova Redis cache 데이터를 우선하여 사용합니다.
+- Cache miss, invalid payload, stale partition, timeout, Redis 장애 등 어떤 실패 상황에서도 ShotGrid 직접 조회를 fallback으로 사용하지 않습니다. read-through cache와 request 시점 rebuild도 수행하지 않습니다.
+- Cache를 사용할 수 없으면 부분 결과를 반환하지 않고 fail-closed합니다.
+- 이 기본 원칙의 이유는 출퇴근 조회가 다수 사용자와 다수 날짜를 한 번에 읽는 대량 조회 경로이기 때문입니다. ShotGrid 직접 조회를 허용하면 응답 지연과 API 부하가 사용자 수와 기간에 비례해 증가합니다.
+
+#### 예외 (ShotGrid 직접 read/write 허용)
+
+아래 목록에 명시된 기능은 기본 원칙의 예외이며, Redis cache를 경유하지 않고 ShotGrid에서 직접 read, create, update, delete를 수행할 수 있습니다. 예외 기능에서는 ShotGrid가 유일한 권위 원천이며, 이때 ShotGrid 조회는 fallback이 아니라 정규 경로입니다.
+
+| 순번 | 예외 기능 | 근거 |
+|------|-----------|------|
+| 1 | 휴일근무 신청 관련 기능 (§4.11) | 요청 1건당 최대 10일 범위의 소량 read/write이므로 대량 조회 지연 문제가 발생하지 않습니다. |
+
+- 예외 목록에 없는 기능은 기본 원칙을 그대로 적용합니다. 예외는 이 표에 명시적으로 추가한 항목에만 적용하며, 유사하다는 이유로 확장 해석하지 않습니다.
+- 예외 기능이라도 Redis를 동시성 제어(distributed lock, idempotency marker) 목적으로 사용하는 것은 금지하지 않습니다. 이는 조회를 대체하는 cache가 아니라 write path의 원자적 상태 기계입니다.
+- 예외 기능의 데이터가 기존 출퇴근 조회 경로(출퇴근 리스트, 주 단위 조회 등)에서 파생 표시나 합산 대상으로 사용될 때는, 그 조회 경로가 기본 원칙 적용 대상이면 해당 경로에서는 계속 Redis cache 데이터를 사용합니다. 예외는 기능 단위가 아니라 요청 경로 단위로 판단합니다.
+
 ---
 
 ## 2. DB 설계
@@ -863,6 +886,8 @@ if correction_approver and correction_approver.get('id') == approver_id:
 
 휴일근무 신청은 기존 출퇴근 기록 엔티티 `CustomNonProjectEntity10`과 `sg_type = 휴일근무`를 사용하는 완전 불변 create-only event workflow다. 별도 Holiday entity, cache, index 또는 event plugin을 만들지 않는다.
 
+휴일근무 기능은 §1.4 데이터 원천 원칙의 예외 1번 항목이며, 모든 read와 write를 ShotGrid에서 직접 수행한다. 요청 1건이 다루는 범위가 최대 10일이므로 출퇴근 월별 대량 조회와 달리 직접 접근으로 인한 응답 지연 문제가 발생하지 않는다.
+
 #### 신청 범위와 입력 검증
 
 - 날짜 계산 timezone은 `Asia/Seoul`이다.
@@ -889,7 +914,7 @@ if correction_approver and correction_approver.get('id') == approver_id:
 
 요청자의 `sg_part_supervisor`가 비어 있으면 신청 생성 직후 `휴일근무 / 승인`과 `휴일근무 / 확정`을 자동 생성한다. 자동 생성된 승인/확정 레코드의 `sg_approver`는 비워 둔다. Supervisor 또는 cache 조회 실패는 승인담당자 없음으로 취급하지 않고 fail-closed한다.
 `sg_part_supervisor`가 비어 있지 않으면 첫 번째 값은 유효한 `HumanUser` link여야 한다. Null, 빈 mapping, 다른 entity type, 유효하지 않은 ID 또는 신청자 본인을 가리키는 값은 승인자 부재로 간주하지 않고 첫 write 전에 fail-closed한다.
-승인자 없는 자동 승인에서 신청 생성 후 승인 또는 확정 생성이 완료되지 않으면 해당 날짜를 성공이나 재신청 가능한 확정 실패로 처리하지 않는다. 생성된 신청을 유지한 채 `pending_dates`로 반환하고, cache reconciliation 후 동일 신청 record를 사용하여 누락된 승인/확정만 복구한다. 새 신청 record를 생성해서는 안 된다.
+승인자 없는 자동 승인에서 신청 생성 후 승인 또는 확정 생성이 완료되지 않으면 해당 날짜를 성공이나 재신청 가능한 확정 실패로 처리하지 않는다. 생성된 신청을 유지한 채 `pending_dates`로 반환하고, ShotGrid에서 해당 신청과 child record를 재조회한 뒤 동일 신청 record를 사용하여 누락된 승인/확정만 복구한다. 새 신청 record를 생성해서는 안 된다.
 
 #### Lifecycle과 sg_parent
 
@@ -919,6 +944,40 @@ if correction_approver and correction_approver.get('id') == approver_id:
 
 중복 신청 검사에서는 승인 대기, 승인됨, 포기됨 상태를 새 신청 차단 상태로 취급한다. 반려됨 또는 취소됨 상태만 새 신청을 허용하며, 새 신청은 직전 신청을 parent로 사용한다.
 
+#### 상태 판정 권위와 전이 규칙
+
+휴일근무는 §1.4 데이터 원천 원칙의 예외 기능이며, lifecycle 상태 판정의 유일한 권위 원천은 ShotGrid다. 읽기 판정과 쓰기 판정을 서로 다른 원천으로 분리하지 않는다.
+
+| 구분 | 권위 원천 | 사용처 |
+|------|-----------|--------|
+| 읽기 판정 | ShotGrid 직접 조회 | 신청함 조회, 휴일근무 modal 상태 표시, 승인 요청 목록 |
+| 쓰기 판정 | ShotGrid 직접 조회 | 신청, 승인, 확정, 반려, 포기, 취소 전이 허용 여부 |
+| 불변 사실 검증 | ShotGrid 직접 조회 | `sg_type`, `sg_date`, `sg_user`, `sg_approver`, 소유자·승인담당자 권한, 날짜 제약 |
+
+- 상태 판정은 대상 `휴일근무 / 신청` record와 그 직접 child record를 ShotGrid에서 조회하여 수행한다. Redis monthly attendance partition을 휴일근무 상태 판정에 사용하지 않는다.
+- 조회 범위는 판정에 필요한 record로 한정한다. 신청함과 승인 요청 조회는 사용자 또는 승인담당자와 대상 기간으로 filter하여 조회한다.
+- ShotGrid 조회가 실패하면 상태를 추정하지 않고 fail-closed한다. Redis fallback도 수행하지 않는다.
+- 허용 전이표를 벗어난 전이는 거부한다.
+- 동시 요청 직렬화를 위해 `sg_user + sg_date` 기준 Redis distributed lock과 idempotency marker를 사용한다. 이 lock과 marker는 상태 판정 권위가 아니라 동시성 제어 수단이며, 상태 판정은 lock 획득 후 ShotGrid 조회로 수행한다.
+- 전이 확정 후 lock을 해제하기 전까지 같은 `sg_user + sg_date`에 대한 다른 전이 요청을 진행하지 않는다. ShotGrid read-after-write 지연 중 중복 처리를 막기 위한 최소 보호다.
+- Write 결과가 불명확하면 해당 날짜를 `pending_dates`로 반환하고 같은 전이를 재시도하지 않는다.
+
+허용 전이표는 다음과 같다.
+
+| 현재 상태 | 허용 전이 | 수행자 |
+|-----------|-----------|--------|
+| 없음 | 승인 대기 (`신청`) | 신청자 |
+| 승인 대기 | 확정 복구 중 (`승인`), 반려됨 (`반려`), 취소됨 (`취소`), 포기됨 (`포기`) | 승인·반려는 승인담당자, 취소·포기는 신청자 |
+| 확정 복구 중 | 승인됨 (`확정`), 취소됨 (`취소`), 포기됨 (`포기`) | 확정은 승인담당자 또는 자동 승인 복구, 취소·포기는 신청자 |
+| 승인됨 | 취소됨 (`취소`), 포기됨 (`포기`) | 신청자 |
+| 반려됨 | 승인 대기 (`신청`, 재신청), 포기됨 (`포기`) | 신청자 |
+| 취소됨 | 승인 대기 (`신청`, 재신청) | 신청자 |
+| 포기됨 | 없음 | - |
+
+- 취소 전이는 대상 날짜 전에만 허용한다. 이 날짜 제약은 항상 적용한다.
+- 동시성 제어용 lock과 idempotency marker에는 TTL을 적용한다.
+- 이 전이 규칙은 ShotGrid 조회·생성 결과를 기준으로 검증한다. 동시성 제어 부분은 실 Redis를 사용하는 통합 테스트로 검증한다.
+
 #### 인증과 권한
 
 - 모든 Holiday Work endpoint는 인증, server-side feature flag 및 CSRF 보호를 적용한다.
@@ -928,31 +987,33 @@ if correction_approver and correction_approver.get('id') == approver_id:
 - 신청자 본인의 self-approval과 self-rejection은 금지한다.
 - 승인 또는 반려 처리 시 authenticated user가 신청 record의 `sg_approver` 및 현재 server-side로 resolve한 승인담당자와 모두 일치하는지 검증한다. 불일치하거나 cache를 확인할 수 없으면 fail-closed한다.
 - 신청함 조회는 인증된 사용자의 `sg_user` record로 제한하고, 승인 요청 조회는 현재 사용자가 실제 승인담당자인 request로 제한한다.
-- Client가 전달한 record ID는 그대로 신뢰하지 않는다. 처리 전에 parent record의 entity type, `sg_type`, `sg_date`, `sg_user`, `sg_approver`, 현재 lifecycle state 및 action 가능 여부를 기존 monthly attendance partition에서 다시 검증한다.
+- Client가 전달한 record ID는 그대로 신뢰하지 않는다. 처리 전에 parent record의 entity type, `sg_type`, `sg_date`, `sg_user`, `sg_approver`, 현재 lifecycle state 및 action 가능 여부를 ShotGrid에서 직접 다시 검증한다.
 - 포기, 취소, 재신청은 parent의 `sg_user`가 인증된 사용자와 일치해야 한다. 승인과 반려는 parent의 실제 승인담당자가 인증된 사용자와 일치해야 한다.
 - `sg_reason`은 plain text로만 취급한다. HTML 출력에서는 context-aware escaping을 적용하고 raw HTML, `innerHTML`, `safe` 또는 `Markup` 우회를 사용하지 않는다.
 
 #### 복수 날짜 처리
 
-- 모든 날짜의 request-level validation과 필요한 monthly attendance partition의 key, schema, freshness 확인을 첫 write 전에 완료한다.
-- Same-month 요청은 해당 monthly attendance partition을 최대 한 번 읽는다.
-- Cross-month 요청은 필요한 각 monthly attendance partition을 최대 한 번씩 읽는다.
-- 필요한 partition 중 하나라도 missing, invalid, stale 또는 unavailable이면 ShotGrid read와 create 없이 전체 요청을 fail-closed한다.
+- 모든 날짜의 request-level validation과 기존 신청 상태 확인을 첫 write 전에 완료한다.
+- 요청에 포함된 모든 날짜의 기존 휴일근무 record는 날짜 범위 filter를 사용한 ShotGrid 조회 한 번으로 읽는다. 날짜별로 조회를 반복하지 않는다.
+- Cross-month 요청도 같은 방식으로 전체 날짜 범위를 한 번에 조회한다.
+- 선검증용 ShotGrid 조회가 실패하면 create 없이 전체 요청을 fail-closed한다.
 - Write 시작 후 확정적으로 실패한 날짜는 `failed_dates`, write 결과가 불명확한 날짜는 `pending_dates`, 성공한 날짜는 `succeeded_dates`로 반환한다.
 - 확정적으로 실패한 날짜가 발생해도 나머지 날짜 처리를 계속한다.
-- 결과가 불명확한 날짜는 reconciliation이 완료되기 전까지 retry하거나 다시 생성하지 않는다.
+- 결과가 불명확한 날짜는 ShotGrid에서 실제 record 존재를 다시 확인하기 전까지 retry하거나 다시 생성하지 않는다.
 - Partial success를 보상하기 위해 성공한 레코드를 취소하거나 삭제하지 않는다.
 - User/date lock은 날짜 오름차순으로 획득하고 idempotency marker로 같은 사용자/날짜의 활성 신청을 최대 한 건으로 제한한다.
 
-#### Cache와 Web 경계
+#### ShotGrid 직접 접근과 Web 경계
 
-- 모든 Web request, API, polling, middleware 및 일반 background read는 기존 Flova Redis monthly attendance partition만 사용한다.
-- Cache miss, invalid payload, stale partition, timeout 또는 Redis 장애에서 ShotGrid read fallback, read-through cache, request-time rebuild를 수행하지 않는다.
-- Holiday 전용 cache, index, event plugin을 추가하지 않는다.
-- 기존 Attendance list payload key `sg:attendance:{YYYY-MM}`는 변경하지 않는다. Partition 검증용 공용 metadata는 companion key `sg:attendance:{YYYY-MM}:meta`에 저장한다.
-- Attendance metadata에는 partition key, 대상 월, schema version, 필수 field 목록과 마지막 ShotGrid 검증 시각을 저장한다. List payload와 metadata를 생성하거나 rebuild할 때는 하나의 Redis transaction으로 publish한다.
-- Holiday Work write 판단에서는 월별 list payload와 metadata를 Redis MGET 한 번으로 읽는다. Metadata가 없거나 대상 월·schema·필수 field가 일치하지 않거나 마지막 검증 후 40분이 지나면 해당 partition을 stale 또는 invalid로 처리하고 fail-closed한다.
-- 기존 Attendance reader의 payload 계약은 유지한다. Holiday Work flag를 활성화하기 전에 Attendance rolling reconcile을 한 번 성공시켜 current, next, next-next 3개월의 metadata를 준비한다.
+휴일근무는 §1.4 예외 기능이므로 아래 경계를 따른다.
+
+- 휴일근무 전용 endpoint의 read와 write는 ShotGrid를 직접 사용한다. Redis monthly attendance partition을 휴일근무 상태 원천으로 사용하지 않는다.
+- ShotGrid 조회 실패, timeout 또는 부분 결과에서 Redis cache로 fallback하지 않고 fail-closed한다.
+- Holiday 전용 cache, index, event plugin을 추가하지 않는다. 동시성 제어용 Redis lock과 idempotency marker는 조회를 대체하는 cache나 index가 아니므로 이 금지 대상이 아니다.
+- ShotGrid 조회는 필요한 record로 범위를 한정한다. 전체 `CustomNonProjectEntity10` scan, 사용자 filter 없는 조회, 날짜 범위 없는 조회를 사용하지 않는다.
+- 휴일근무 record 생성은 기존 출퇴근 entity `CustomNonProjectEntity10`을 사용하므로 기존 Attendance Event Framework plugin이 그 월 partition을 rebuild한다. 이는 출퇴근 조회 경로용 갱신이며 휴일근무 판정에는 사용하지 않는다.
+- 기존 Attendance list payload key `sg:attendance:{YYYY-MM}`와 companion metadata key `sg:attendance:{YYYY-MM}:meta`, 그 schema를 휴일근무 때문에 변경하지 않는다.
+- 기존 Attendance reader의 payload 계약은 유지한다.
 - 기존 ShotGrid Event Framework Attendance plugin은 `CustomNonProjectEntity10`의 `New`, `Change`, `Revival` event에서 영향받은 `sg_date` 월을 중복 제거한 뒤 월별 한 번씩 rebuild한다. 같은 월 event burst는 해당 월 cache query 한 번으로 합치고, 날짜가 다른 월로 변경되면 이전 월과 새 월을 각각 한 번씩 rebuild한다.
 - ValiDuck은 30분마다 기존 historical reconcile과 별도의 Attendance rolling reconcile을 실행한다.
 - Historical reconcile이 실패해도 같은 주기의 Attendance rolling reconcile을 실행하며, Attendance rolling 실패도 historical 결과를 되돌리지 않는다. 두 작업의 오류는 각각 기록하고 둘 다 시도한 뒤 해당 주기를 실패로 보고한다.
@@ -961,7 +1022,8 @@ if correction_approver and correction_approver.get('id') == approver_id:
 - Rolling 대상 3개월의 ShotGrid ID 조회와 rebuild 대상 월의 full payload 조회가 모두 성공한 뒤 Redis transaction으로 한 번에 publish한다. 조회 또는 publish 실패 시 일부 월만 갱신하지 않는다.
 - Rolling 대상 3개월의 ShotGrid ID 조회가 모두 성공하면 payload rebuild 여부와 관계없이 같은 transaction에서 각 partition metadata의 마지막 검증 시각을 갱신한다.
 - 기존 Web process의 monthly attendance memo TTL 45초를 변경하지 않는다. Event Framework 또는 ValiDuck 같은 외부 process의 publish 결과는 Web process에서 최대 45초 안에 반영되며, 같은 process에서 실행한 save/publish만 listener로 즉시 memo를 무효화한다.
-- `휴일근무 신청함`과 `휴일근무 승인 요청`은 `/attendance/list`에서 사용자가 명시적으로 열 때만 조회한다.
+- 위 Attendance partition metadata와 rolling reconcile 규칙은 출퇴근 조회 경로와 주 단위 조회를 위해 계속 유지한다. 다만 이 규칙은 더 이상 휴일근무 기능의 선행 조건이나 활성화 조건이 아니다.
+- `휴일근무 신청함`과 `휴일근무 승인 요청`은 `/attendance/list`에서 사용자가 명시적으로 열 때만 ShotGrid를 조회한다.
 - 공통 네비게이션 바의 오늘 날짜를 선택하면 동작 메뉴를 표시한다. `휴일 근무 신청` 메뉴에서 다가오는 신청 가능 휴일을 월별 캘린더로 보여 주는 휴일근무 modal을 열며, 출퇴근 페이지 날짜 dropdown이나 화면 하단의 별도 고정 진입 버튼은 사용하지 않는다.
 - Notification page, navbar count, page-load request, background polling 및 generic pending behavior에는 Holiday Work를 연결하지 않는다.
 
@@ -977,6 +1039,57 @@ if correction_approver and correction_approver.get('id') == approver_id:
 - 2~10일 batch는 `ATTENDANCE_HOLIDAY_WORK_BATCH_ENABLED`, cross-month 선택은 `ATTENDANCE_HOLIDAY_WORK_CROSS_MONTH_ENABLED`로 단계적으로 활성화한다.
 - Web consumer flag가 꺼져 있으면 `/attendance/list`에 휴일근무 진입점을 표시하지 않고 endpoint도 fail-closed한다.
 - Cross-month flag가 꺼져 있어도 single-date와 same-month 동작은 유지한다.
+
+### 4.12 주 단위 출퇴근 조회
+
+주 단위 출퇴근 조회는 월요일부터 일요일까지의 7일을 한 주로 사용하며, 현재 effective HumanUser의 Attendance Admin 권한이 `true`인 경우에만 button과 API를 제공한다. Attendance Admin이 일반 사용자로 전환한 경우에는 일반 사용자와 동일하게 주 단위 button을 표시하지 않고 API 접근을 거부한다.
+
+#### 근무시간 합산
+
+주간 근무시간은 유급휴가 인정시간을 제외한 실제 근무시간만 합산한다.
+
+| 날짜 구분 | 합산 시간 |
+|-----------|-----------|
+| 평일 | 기존 일별 출퇴근 계산 결과의 정규근무시간 + 야근시간 |
+| 토요일·일요일·공휴일 | 식사시간을 차감하지 않은 실제 출근부터 퇴근까지의 총 체류시간 |
+| 미래 날짜 | 0분 |
+
+- 현재 근무 중인 사용자는 현재 시각까지 계산한 임시 근무시간을 포함하고 임시값임을 표시한다.
+- 비근로일 하루 총 체류시간이 420분 이상이면 `대휴 발생`을 표시한다.
+- 비근로일 하루 총 체류시간이 480분 이상이면 `대휴 발생`과 `점심식사비용 청구가능`을 함께 표시한다.
+- 실제 대휴 생성, 지급 및 처리는 다우오피스의 책임 범위이며 INFX Works는 대상 표시만 제공한다.
+
+#### 휴일근무 포함 범위
+
+평일 근무시간은 모든 상태에서 항상 합산한다. 기본값은 `휴일근무 포함`과 `승인된 휴일근무만`을 모두 해제한 상태다.
+
+| `휴일근무 포함` | `승인된 휴일근무만` | 합산 범위 | 표시 기준 |
+|-----------------|----------------------|-----------|-----------|
+| 해제 | 해제 | 평일 실제 근무시간 | `휴일 제외 기준` |
+| 선택 | 해제 | 평일 + 모든 비근로일 실제 근무시간 | 전체 실제근무 기준 |
+| 선택 | 선택 | 평일 + 승인된 비근로일 실제 근무시간 | `승인 휴일 포함 기준` |
+
+- `승인된 휴일근무만`은 `휴일근무 포함`이 선택된 경우에만 활성화한다.
+- 두 checkbox가 선택된 상태에서 `휴일근무 포함`을 해제하면 두 checkbox를 함께 해제한다.
+- `승인된 휴일근무만`만 선택된 상태는 유효하지 않으며 두 checkbox 해제 상태로 정규화한다.
+- 승인된 휴일근무는 해당 신청의 마지막 직접 child 상태가 `확정`인 `approved` 상태만 인정한다.
+- 주 단위 조회는 §1.4 기본 원칙 적용 대상이므로, 이 판정도 휴일근무 전용 endpoint와 달리 Redis monthly attendance partition 데이터로 수행한다. 주 단위 조회에서 휴일근무 상태를 ShotGrid로 직접 조회하지 않는다.
+- 승인 대기, 확정 복구 중, 반려, 취소 및 포기 상태는 승인된 휴일근무 합계에서 제외한다.
+
+#### 주 52시간 표시
+
+- 각 유효한 휴일근무 포함 상태의 합계를 기준으로 3,120분 초과 여부와 초과시간을 계산한다.
+- 합계가 정확히 3,120분이면 초과가 아니며 3,121분부터 초과로 표시한다.
+- 모든 실제 휴일근무를 포함한 상태만 휴일근로를 포함한 전체 실제근무 기준으로 설명한다.
+- 휴일 제외 또는 승인된 휴일만 포함한 상태는 각각 계산 범위를 명시하며 법정 보고값이나 확정 판정으로 표기하지 않는다.
+
+#### 데이터와 Cache 경계
+
+- Web request는 기존 Flova Redis monthly attendance partition만 사용한다.
+- 월 또는 연 경계의 한 주는 필요한 monthly partition을 최대 2개 조합한다.
+- 새 weekly cache, Redis key, payload schema, partition, index, memo 또는 event plugin을 추가하지 않는다.
+- 필요한 partition 중 하나라도 missing, invalid, stale 또는 unavailable이면 부분 합계를 반환하지 않고 cache unavailable로 fail-closed한다.
+- Cache 실패 시 ShotGrid read fallback, read-through cache 또는 request 시점 rebuild를 수행하지 않는다.
 
 ---
 
@@ -1009,11 +1122,14 @@ if correction_approver and correction_approver.get('id') == approver_id:
 23. **휴일근무 처리 parent**: `승인`, `확정`, `반려`, `포기`, `취소`는 처리 대상 `휴일근무 / 신청`을 직접 parent로 사용한다.
 24. **휴일근무 재신청 parent**: 반려 또는 취소 후 재신청한 `휴일근무 / 신청`은 직전 `휴일근무 / 신청`을 parent로 사용한다.
 25. **휴일근무 중복 방지**: 같은 `sg_user + sg_date`의 승인 대기, 승인됨 또는 포기됨 상태에서 새 신청을 생성하지 않는다. 반려됨 또는 취소됨 상태만 재신청을 허용한다.
-26. **휴일근무 요청 원자적 선검증**: 날짜, 사유, 중복 및 필요한 monthly attendance partition을 첫 write 전에 모두 검증한다.
-27. **휴일근무 불명확 결과**: Write 결과가 불명확한 날짜는 reconciliation 전까지 retry하거나 재생성하지 않는다.
+26. **휴일근무 요청 원자적 선검증**: 날짜, 사유, 중복을 첫 write 전에 ShotGrid 직접 조회로 모두 검증한다.
+27. **휴일근무 불명확 결과**: Write 결과가 불명확한 날짜는 ShotGrid에서 record 존재를 재확인하기 전까지 retry하거나 재생성하지 않는다.
 28. **휴일근무 partial success 보존**: 복수 날짜 중 성공한 레코드를 다른 날짜의 실패 보상 목적으로 취소하거나 삭제하지 않는다.
 29. **휴일근무 server-side 권한 검증**: 신청자는 인증된 실제 사용자로 강제하고, 승인/반려는 현재 실제 승인담당자만, 포기/취소/재신청은 parent 신청의 소유자만 수행한다.
 30. **휴일근무 출력 안전성**: 사용자 입력 `sg_reason`은 plain text로 저장·표시하고 HTML context에 맞게 escape한다.
+31. **휴일근무 상태 판정 권위**: 읽기와 쓰기 모두 ShotGrid 직접 조회 결과로 판정한다. Redis monthly attendance partition을 휴일근무 상태 판정 권위로 사용하지 않는다.
+32. **휴일근무 전이표 준수**: 신청, 승인, 확정, 반려, 포기, 취소는 허용 전이표에 정의된 전이만 수행하며, 같은 `sg_user + sg_date`에 대한 동시 전이는 Redis lock으로 직렬화한다.
+33. **Cache fallback 금지**: §1.4 기본 원칙 적용 경로에서 cache 실패 시 ShotGrid 직접 조회를 fallback으로 사용하지 않는다. §1.4 예외 기능에서는 ShotGrid가 정규 경로이며, 반대로 Redis cache를 fallback으로 사용하지 않는다.
 
 ### 5.2 마이그레이션 규칙 (완료)
 
