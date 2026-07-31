@@ -509,3 +509,120 @@ def get_mov_frame_info(filepath):
 def create_from_path(cls, path: str):
     pass
 ```
+
+---
+
+## DCC 안에서의 객체 소멸 처리 (중요)
+
+DCC(Houdini, Maya, Nuke) 안에서 동작하는 GUI 코드는 Qt 객체의 **소멸 경로**를 다룰 때 특히 주의해야 합니다. 이 구역에서 발생하는 문제는 파이썬 예외가 아니라 C++ 레벨의 강제종료로 나타나기 때문에, 로그도 트레이스백도 남지 않습니다.
+
+### destroyed 시그널 안에서 그 객체의 연결을 끊지 않는다
+
+가장 위험한 패턴입니다. 실제로 Houdini 강제종료를 일으킨 사례가 있습니다.
+
+`destroyed` 시그널은 `QObject::~QObject()` 실행 **도중**에 발생합니다. 이 시점의 객체는 파생 클래스 소멸자가 이미 끝난 상태이고 소멸 절차가 진행 중입니다. 그 안에서 해당 객체의 연결 목록을 수정하면 정의되지 않은 동작이 됩니다.
+
+```python
+# 잘못된 사용 (X) - Houdini 강제종료
+def _drop_registration(self, registration):
+    window = registration.window
+    if window is not None and is_qt_object_valid(window):
+        window.destroyed.disconnect(registration.detach)   # ~QObject 실행 중 호출됨
+```
+
+```python
+# 올바른 사용 (O) - destroyed 연결은 끊지 않는다
+def _drop_registration(self, registration):
+    # 창의 destroyed 연결은 절대 끊지 않는다.
+    # 여기서 끊는 연결의 소유자는 창이 아니라 매니저 자신이라 안전하다.
+    self.changed.disconnect(registration.apply)
+```
+
+`destroyed` 연결을 정리하고 싶다면, 끊는 대신 **연결을 창당 한 번만 걸고 그대로 두는** 방식을 씁니다. 슬롯이 여러 번 불려도 무해하도록 재진입 가드를 두면 됩니다.
+
+```python
+def _watch_window_destroyed(self, window, key):
+    if getattr(window, _WINDOW_DESTROY_WATCH_ATTRIBUTE, None) is self:
+        return
+    # 등록 객체가 아니라 등록 키에 연결한다.
+    # 같은 창은 재등록해도 같은 키를 쓰므로 최초 연결 하나로 계속 정리된다.
+    window.destroyed.connect(functools.partial(self._drop_key, key))
+    setattr(window, _WINDOW_DESTROY_WATCH_ATTRIBUTE, self)
+```
+
+### isValid()를 소멸 진행 중인 객체의 가드로 믿지 않는다
+
+`shiboken2.isValid()`는 **검사한 그 순간**만 보장합니다. `destroyed` 슬롯 안에서는 shiboken이 아직 래퍼를 무효화하기 전일 수 있어 `True`를 돌려주며, 그래서 소멸 진행 중인 객체를 걸러내지 못합니다.
+
+```python
+# 잘못된 사용 (X) - 이 가드는 소멸 중인 객체를 통과시킨다
+if is_qt_object_valid(window):
+    window.destroyed.disconnect(slot)
+```
+
+`isValid()`는 "이미 파괴가 끝난 객체를 건드리지 않기 위한" 용도로만 씁니다. 소멸이 진행 중인 상황에서는 안전장치가 되지 못합니다.
+
+### id()를 객체 등록 키로 쓰지 않는다
+
+CPython의 `id()`는 메모리 주소이고, 객체가 수거되면 같은 주소가 곧바로 재사용됩니다. 창을 자주 열고 닫는 DCC 환경에서는 **다른 객체가 같은 키를 갖는 상황**이 실제로 발생하며, 잔존 등록이 남아 있으면 엉뚱한 객체를 정리하게 됩니다.
+
+```python
+# 잘못된 사용 (X)
+self._registrations[id(window)] = registration
+```
+
+```python
+# 올바른 사용 (O) - 창에 심어 둔 UUID를 키로 쓴다
+def _window_key(window):
+    key = getattr(window, _WINDOW_KEY_ATTRIBUTE, None)
+    if key is None:
+        key = uuid.uuid4().hex
+        setattr(window, _WINDOW_KEY_ATTRIBUTE, key)
+    return key
+```
+
+### 파이썬 GC가 아무 때나 돈다는 것을 전제한다
+
+CPython의 가비지 컬렉션은 임의의 시점, 임의의 C++ 스택 깊이에서 실행됩니다. Qt 객체를 대량으로 만들고 버리는 구간(예: 목록 로딩)에서 GC가 돌면 그 자리에서 파괴 연쇄가 시작될 수 있습니다.
+
+- 앱 수명 싱글턴이 창 등록부를 들고 있으면, 잔존 등록은 창보다 오래 살아남아 반드시 이 경로에서 호출됩니다.
+- 그러므로 "정상적으로 닫히는 경우"만 가정한 정리 코드는 DCC에서 통하지 않습니다. `closeEvent`를 거치지 않는 파괴 경로(`deleteLater`, `WA_DeleteOnClose`, C++ 부모에 의한 파괴, DCC 종료)를 항상 함께 고려합니다.
+
+### DCC 메인 윈도우를 부모로 지정한다
+
+부모 없는 top-level 창은 Qt 소유권이 파이썬에 남아 예기치 않은 시점에 파괴됩니다. Houdini에서는 실행 직후 강제종료로 이어집니다.
+
+```python
+parent = None
+if DCCDetector.is_maya():
+    from flova.maya.ui import maya_widget
+    parent = maya_widget()
+elif DCCDetector.is_houdini():
+    import hou
+    parent = hou.qt.mainWindow()
+
+super().__init__(window_name=..., parent=parent)
+```
+
+SideFX 공식 문서도 같은 취지로, 창을 `hou.session` 같은 곳에 보관하거나 메인 윈도우에 부모를 지정해 Houdini가 수명을 관리하게 하라고 안내합니다.
+
+### 창을 다시 열 때는 close()를 먼저 부른다
+
+`deleteLater()`만 부르면 `closeEvent`가 발생하지 않아 등록 해제나 상태 저장 같은 정리가 이루어지지 않습니다.
+
+```python
+# 올바른 사용 (O)
+if window is not None and is_qt_object_valid(window):
+    window.close()          # closeEvent가 발생해 정리가 이루어진다
+    window.deleteLater()
+    window = None
+```
+
+### Qt 객체는 메인 스레드에서만 다룬다
+
+SideFX 공식 문서는 Qt 코드를 반드시 Houdini 메인 스레드에서 실행하라고 명시합니다. PyQt/PySide는 Qt 객체 조작이 스레드 안전하지 않으며, 그중에서도 **삭제가 가장 위험**합니다. 백그라운드 스레드에서는 위젯을 만들지도, 접근하지도, 파괴하지도 않습니다.
+
+### 참고
+
+- [HOM cookbook — Qt (SideFX 공식)](https://www.sidefx.com/docs/houdini/hom/cb/qt.html)
+- [PyQt와 파이썬 GC의 상호작용 문제](https://www.riverbankcomputing.com/pipermail/pyqt/2011-August/030378.html)
