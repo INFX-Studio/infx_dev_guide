@@ -632,6 +632,74 @@ reload 호출 위치가 패키지 `__init__`이면 특히 위험합니다. 메�
 
 이 중 어느 것이 결정적인지는 실측으로만 가릅니다. **크래시가 보고되지 않은 DCC라도 이 패턴은 그대로 위험**하다고 간주합니다.
 
+### C++가 소유한 자식 객체의 시그널에 connect 하지 않는다 (Houdini 강제종료)
+
+PySide2 5.15.2에는 **C++가 소유한 자식 객체의 시그널에 `connect` 하면 그 파이썬 래퍼가 영구히 남는 버그**가 있습니다. 부모가 파괴되어 C++ 객체가 사라져도 래퍼만 살아남고, `gc.collect()`로도 회수되지 않으며 `disconnect`로도 해소되지 않습니다.
+
+대표 사례는 `QTableWidget.horizontalHeader()`가 돌려주는 기본 `QHeaderView`입니다.
+
+```python
+# 잘못된 사용 (X) - 창을 열 때마다 죽은 래퍼가 하나씩 쌓인다
+header = self.horizontalHeader()          # C++가 소유한 헤더
+header.sectionResized.connect(self.on_header_resized)
+header.sectionClicked.connect(self.on_header_clicked)
+```
+
+순수 PySide2로 실측한 대조 결과입니다.
+
+| 동작 | 누수 |
+| --- | --- |
+| `horizontalHeader()` 호출만 | 없음 |
+| 헤더를 지역변수에 보관 | 없음 |
+| **헤더 시그널에 `connect`** | **사이클당 1개** |
+| `connect` 후 `disconnect` | 사이클당 1개 |
+| 테이블 자기 시그널에 `connect` | 없음 |
+| 파이썬이 소유한 헤더를 `setHorizontalHeader`로 지정 후 연결 | 없음 |
+
+```
+PySide2 5.15.2  기본 헤더 3사이클 → +3 / 9사이클 → +9  (정비례)
+PySide2 5.15.2  소유 헤더 3사이클 →  0 / 9사이클 →  0
+PySide6 6.11.0  기본 헤더 연결해도 → 0                 (PySide2 한정 버그)
+```
+
+이 누수는 오픈망(정품 Python 3.10 + PySide2 5.15.2)에서는 조용히 쌓이기만 하지만, **Houdini 20.5의 Python 3.11용 자체 패치 shiboken2에서는 그 죽은 래퍼가 GC에서 파괴되는 순간 `signal 11`로 즉사**합니다. 트레이스백은 남지 않습니다.
+
+#### 올바른 사용 — 파이썬이 소유한 헤더로 교체하고 강참조를 유지한다
+
+```python
+# 올바른 사용 (O)
+header = QtWidgets.QHeaderView(QtCore.Qt.Horizontal, self)
+self.setHorizontalHeader(header)
+# 래퍼를 반드시 강참조로 붙들어 둔다. 지역변수로만 두면 안 된다.
+self._owned_horizontal_header = header
+
+header.sectionResized.connect(self.on_header_resized)
+header.sectionClicked.connect(self.on_header_clicked)
+```
+
+두 가지를 반드시 지켜야 합니다.
+
+**1. 래퍼를 인스턴스 속성으로 강참조 유지합니다.** 교체한 헤더를 지역변수로만 들고 있으면 `__init__` 종료 후 래퍼가 GC 대상이 됩니다. 정품 PySide2는 부모 있는 객체의 래퍼가 죽어도 C++ 객체를 지우지 않지만, Houdini의 패치 shiboken2는 이때 C++ 헤더까지 삭제합니다. 그러면 뷰가 매달린 헤더를 참조한 채 다음 갱신(`item.setData` 등)에서 즉사합니다. 즉 같은 특성이 **역방향으로도** 터집니다. 실측으로 확인된 사항입니다.
+
+**2. 기본 헤더와 다른 속성 기본값을 복원합니다.** 새로 만든 `QHeaderView`는 기본값이 다릅니다.
+
+| 속성 | 기본 헤더 | 새로 만든 헤더 |
+| --- | --- | --- |
+| `sectionsClickable` | `True` | `False` |
+| `highlightSections` | `True` | `False` |
+| `sectionResizeMode` | `Interactive` | `Fixed` |
+
+이것을 빠뜨리면 테이블의 정렬과 폭 조절이 조용히 동작을 멈춥니다.
+
+#### 판별 방법
+
+증상은 "Houdini 기동 직후 실행하면 거의 100% 죽고, 10초 기다리거나 다른 툴을 먼저 띄우면 확률이 크게 떨어지는" 형태로 나타납니다. 이는 기동 경과 시간 자체가 원인이 아니라, **그 시점의 GC가 한 번에 수거하는 가비지 더미에 죽은 래퍼가 섞일 확률** 문제입니다. 기다리면 평상시 GC가 가비지를 잘게 나눠 수거하므로 확률이 낮아질 뿐입니다.
+
+- `gc.disable()`로 GC를 봉쇄하면 어떤 실행 패턴에서도 죽지 않습니다. 크래시가 GC 경로 안에 있다는 것을 가릅니다.
+- `gc.DEBUG_SAVEALL`을 걸고 같은 수거를 돌리면 생존합니다. 크래시가 순회(`tp_traverse`)가 아니라 **수거물 파괴 단계**임을 가릅니다.
+
+이 두 대조가 모두 성립하면 죽은 Qt 래퍼의 `dealloc`을 의심합니다.
+
 ### DCC 메인 윈도우를 부모로 지정한다
 
 부모 없는 top-level 창은 Qt 소유권이 파이썬에 남아 예기치 않은 시점에 파괴됩니다. Houdini에서는 실행 직후 강제종료로 이어집니다.
@@ -665,6 +733,12 @@ if window is not None and is_qt_object_valid(window):
 ### Qt 객체는 메인 스레드에서만 다룬다
 
 SideFX 공식 문서는 Qt 코드를 반드시 Houdini 메인 스레드에서 실행하라고 명시합니다. PyQt/PySide는 Qt 객체 조작이 스레드 안전하지 않으며, 그중에서도 **삭제가 가장 위험**합니다. 백그라운드 스레드에서는 위젯을 만들지도, 접근하지도, 파괴하지도 않습니다.
+
+### PySide6에서는 소멸 관련 버그 일부가 사라진다
+
+위의 "C++가 소유한 자식 객체의 시그널에 connect" 누수는 PySide6에서 재현되지 않습니다. Houdini 21 이상은 Qt6를 사용하므로 DCC 버전 상향과 함께 이 문제군은 소멸합니다. PySide6 전용 구현(`flova/ui/pyside6/*`)에는 헤더 교체를 적용하지 않아도 됩니다.
+
+다만 나머지 항목(`destroyed` 안에서 disconnect 금지, `isValid()` 신뢰 금지, `id()` 키 금지, 서브모듈 reload 금지, 메인 스레드 제약)은 Qt 자체의 소멸 의미론에서 오는 것이므로 PySide6에서도 그대로 적용합니다.
 
 ### 참고
 
