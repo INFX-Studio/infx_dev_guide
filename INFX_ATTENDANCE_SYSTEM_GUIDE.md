@@ -1497,7 +1497,7 @@ python manage.py repair_no_approver_attendance_requests --request-id 6966 --appl
 
 `출장`은 무급휴가가 아니다. 기간휴가 엔티티에서 동기화하지만 무급휴가 분류, 무급휴가 Excel 집계, 무급 시간 차감 대상에 포함하지 않는다. 근태 판정에서는 §7.9 종일 휴가 규칙을 그대로 적용하며, 출근·퇴근 체크는 선택 사항으로 계속 사용할 수 있다.
 
-캘린더 표시에서만 `휴가`로 라벨을 바꾸고, 저장값과 출퇴근 타임라인 라벨은 canonical 값인 `출장`을 유지한다. 타임라인에서는 `10:00~19:00` 구간의 전용 `휴가블록` variant로 표시한다. 시각 규칙은 `project_timelog_web/DESIGN_GUIDE.md`의 `Business Trip Leave Block`을 따른다.
+캘린더, 출퇴근 타임라인, 저장값 모두 canonical 값인 `출장`을 그대로 표시한다. 타임라인에서는 `10:00~19:00` 구간의 전용 `휴가블록` variant로 표시한다. 시각 규칙은 `project_timelog_web/DESIGN_GUIDE.md`의 `Business Trip Leave Block`을 따른다.
 
 ### 7.5 출퇴근 현황과의 관계
 
