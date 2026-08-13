@@ -1489,6 +1489,16 @@ python manage.py repair_no_approver_attendance_requests --request-id 6966 --appl
 | `경조` | 경조 | 무급휴가 엔티티 |
 | `휴직휴가` | 휴직휴가 | 무급휴가 엔티티 |
 
+#### 출장 sg_type 값 (기간휴가 엔티티에서 동기화)
+
+| Code | Display Name | 출처 |
+|------|--------------|------|
+| `출장` | 출장 | 기간휴가 엔티티 |
+
+`출장`은 무급휴가가 아니다. 기간휴가 엔티티에서 동기화하지만 무급휴가 분류, 무급휴가 Excel 집계, 무급 시간 차감 대상에 포함하지 않는다. 근태 판정에서는 §7.9 종일 휴가 규칙을 그대로 적용하며, 출근·퇴근 체크는 선택 사항으로 계속 사용할 수 있다.
+
+캘린더 표시에서만 `휴가`로 라벨을 바꾸고, 저장값과 출퇴근 타임라인 라벨은 canonical 값인 `출장`을 유지한다. 타임라인에서는 `10:00~19:00` 구간의 전용 `휴가블록` variant로 표시한다. 시각 규칙은 `project_timelog_web/DESIGN_GUIDE.md`의 `Business Trip Leave Block`을 따른다.
+
 ### 7.5 출퇴근 현황과의 관계
 
 ```
@@ -1512,61 +1522,73 @@ python manage.py repair_no_approver_attendance_requests --request-id 6966 --appl
 
 #### 동기화 방식
 
+동기화 주체는 기간휴가의 **만료일(`sg_end_time`) 지정 여부**로 나눈다.
+
+| 구분 | 동기화 주체 | 시점 | 생성 범위 |
+|------|-------------|------|-----------|
+| **만료일 있음** | ShotGrid Event Framework | 기간휴가 등록/변경 즉시 | 기간 전체 (미래 날짜 포함, 기간 길이 제한 없음) |
+| **만료일 없음** | ValiDuck 스케줄러 (C:/dev/infx/validuck) | 1시간마다 | 당일분만 |
+
+만료일이 있으면 기간이 확정되어 있으므로 미리 전체를 전개할 수 있고, 등록/변경 즉시 반영하므로 변경 사항을 다시 조회하는 비용이 들지 않는다. 만료일이 없으면 끝을 알 수 없으므로 매일 당일분만 생성할 수밖에 없다.
+
 | 항목 | 정책 |
 |------|------|
-| **동기화 주체** | ValiDuck 스케줄러 (C:/dev/infx/validuck) |
-| **동기화 주기** | 매일 오전 7시 |
-| **입력 방식** | 당일 날짜만 생성 (과거/미래 한꺼번에 생성 금지) |
-| **기간 변경 대응** | 기간이 줄어들면 이미 생성된 미래 레코드는 유지 (역사적 기록)<br>기간이 늘어나면 다음 날 7시에 새로 생성 |
-| **종류 구분** | 무급휴가 엔티티의 `sg_leave_type` 값을 그대로 휴가 엔티티 `sg_type`으로 사용 |
-| **중복 방지** | `sg_user + sg_date + sg_type` 조합으로 중복 체크 |
+| **비근로일 처리** | 토요일, 일요일, 공휴일에는 레코드를 생성하지 않는다. 두 경로 모두 같은 기준을 사용한다. |
+| **기간 변경 대응** | 기간이 늘어나면 늘어난 범위를 즉시 생성한다.<br>기간이 줄어들면 새 기간 밖의 **LeavePeriod 동기화 레코드만 삭제**한다. |
+| **수동 레코드 보호** | `sg_reason`이 `LeavePeriod를 통한 입력`으로 시작하지 않는 수동 등록 레코드는 범위 안팎을 가리지 않고 생성·수정·삭제 대상에서 제외한다. |
+| **삭제 이벤트** | 기간휴가 레코드가 삭제(Retirement)되어도 이미 생성된 휴가 엔티티 레코드는 보존한다. |
+| **종류 구분** | 기간휴가 엔티티의 `sg_leave_type` 값을 그대로 휴가 엔티티 `sg_type`으로 사용 |
+| **중복 방지** | `sg_user + sg_date` 조합으로 중복 체크 (멱등성 보장, 재실행해도 중복 생성하지 않음) |
 | **소스 오브 트루스** | 확정 후(익일)는 휴가 엔티티가 소스 오브 트루스 |
+
+기간 축소 시 삭제하는 이유는 휴가 엔티티가 기간휴가에서 파생된 조회용 레코드이기 때문이다. 원본과 어긋난 레코드가 남으면 캘린더와 출퇴근 현황에 존재하지 않는 휴가가 계속 표시된다. 다만 수동 등록 레코드는 파생 레코드가 아니므로 보존한다.
+
+#### ShotGrid Event Framework 플러그인 설정
+
+**플러그인 파일**: `sg_event_framework/plugins/sync_period_leave_to_paid_leave.py`
+
+| 설정 | 값 |
+|------|-----|
+| **감시 엔티티** | `CustomNonProjectEntity01` |
+| **감시 이벤트** | `New`, `Change`, `Retirement`, `Revival` |
+| **Change 감시 필드** | `sg_user`, `sg_leave_type`, `sg_start_time`, `sg_end_time`, `description` |
+| **실행 메서드** | `UnpaidLeaveSync.sync_period_leave_record()` |
+
+휴가 엔티티(`CustomNonProjectEntity09`) 레코드가 생성되면 기존 `create_sg_paid_leave_cache` 플러그인이 해당 연도 Redis partition을 갱신한다. 별도 cache 플러그인을 추가하지 않는다.
 
 #### 아키텍처
 
 ```
-무급휴가 엔티티(기간 관리) 
-    ↓ (ValiDuck 매일 7시)
-flova.timelog.attendance.sync_unpaid_leave_for_date()
-    - 무급휴가 엔티티 조회
-    - 당일 해당자 필터링
-    - 중복 체크 (user+date+type)
-    - 휴가 엔티티 생성
+기간휴가 엔티티(기간 관리, CustomNonProjectEntity01)
+    │
+    ├─ 만료일 있음 ─→ (SG Event Framework, 등록/변경 즉시)
+    │                  UnpaidLeaveSync.sync_period_leave_record()
+    │                     - 기간 전체를 평일만 전개
+    │                     - 중복 체크 (user+date)
+    │                     - 기간 축소 시 범위 밖 동기화 레코드 삭제
+    │
+    └─ 만료일 없음 ─→ (ValiDuck 1시간마다)
+                       flova.timelog.attendance.sync_unpaid_leave_for_date()
+                          - 만료일 없는 기간휴가만 조회
+                          - 당일 해당자 필터링
+                          - 중복 체크 (user+date)
+                          - 휴가 엔티티 생성
     ↓
 휴가 엔티티(날짜별 레코드) ← 출퇴근 현황 조회 시 활용
 ```
 
 #### ValiDuck 플러그인 설정
 
-**플러그인 파일**: `validuck/plugins/unpaid_leave_sync.py`
+**플러그인 파일**: `validuck/plugins/append_unpaid_leave.py`
 
 | 설정 | 값 |
 |------|-----|
-| **플러그인 이름** | `무급휴가_동기화` |
-| **스케줄** | 매일 오전 7:00 (`schedule().every().day.at('07:00')`) |
+| **플러그인 이름** | `무급휴가_추가` |
+| **스케줄** | 1시간마다 (`schedule().every(1).hours`) |
 | **실행 함수** | `sync_unpaid_leave_for_date()` |
+| **대상** | 만료일이 없는 기간휴가만 |
+| **비근로일** | `is_unpaid_leave_sync_day()`로 토·일·공휴일 skip |
 | **활성화** | `enabled = True` |
-
-**플러그인 코드**:
-
-```python
-from core import Plugin, schedule
-from flova.timelog.attendance import sync_unpaid_leave_for_date
-
-
-class UnpaidLeaveSyncPlugin(Plugin):
-    """무급휴가 동기화 플러그인."""
-
-    name = '무급휴가_동기화'
-    description = '무급휴가를 휴가 엔티티에 날짜별로 동기화한다'
-    schedules = [schedule().every().day.at('07:00')]
-    enabled = True
-
-    def execute(self) -> None:
-        """매일 07:00에 실행."""
-        created_records = sync_unpaid_leave_for_date()
-        self.log.info(f'동기화 완료: {len(created_records)}개 레코드 생성')
-```
 
 **실행 방법**:
 
@@ -1580,7 +1602,7 @@ python -c "
 from core import ValiDuck
 duck = ValiDuck()
 duck.load_plugins()
-duck.run_once('무급휴가_동기화')
+duck.run_once('무급휴가_추가')
 "
 ```
 
@@ -1592,9 +1614,28 @@ duck.run_once('무급휴가_동기화')
 def sync_unpaid_leave_for_date(target_date=None):
     """
     지정된 날짜의 무급휴가를 휴가 엔티티에 동기화한다.
-    
+
+    만료일이 없는 기간휴가만 대상으로 한다.
+
     Args:
         target_date: 동기화 대상 날짜 (None이면 오늘)
+    """
+
+
+# UnpaidLeaveSync 메서드
+def sync_period_leave_record(period_leave):
+    """
+    만료일이 지정된 기간휴가를 기간 전체 날짜로 전개한다.
+
+    SG Event Framework에서 기간휴가가 생성/변경될 때 호출한다.
+    평일만 생성하며, 기간이 줄어들면 범위 밖의 LeavePeriod 동기화 레코드를
+    삭제한다. 수동 등록 레코드는 보존한다.
+
+    Args:
+        period_leave: 기간휴가(CustomNonProjectEntity01) 레코드
+
+    Returns:
+        List[dict]: 새로 생성한 휴가 엔티티 레코드 목록
     """
 
 
