@@ -144,7 +144,10 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 - `.tx`는 원본 텍스쳐에서 재생성 가능한 파생물이므로 업로드 제외를 권장합니다. (결정 대기)
 - 프로젝트 폴더가 삭제되어도 ShotGrid에 파일이 남는 것이 이 방식의 핵심입니다.
 
-### 3.4 asset_manifest.json 스키마 (초안)
+### 3.4 asset_manifest.json 스키마 (schema_version 1)
+
+- 스키마 정의·생성·검증·입출력은 공용 모듈 `flova/shotgrid/total_library.py`가 담당합니다.
+  (`build_asset_manifest`, `validate_asset_manifest`, `write_manifest`, `read_manifest`)
 
 ```json
 {
@@ -155,14 +158,22 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
     "task": "lookdev", "version_code": "volvo_lookdev_v002",
     "sg_version_id": 123456, "published_at": "2026-08-26T10:00:00+09:00", "user": "홍길동"
   },
-  "dcc": {"app": "Maya", "version": "2022", "renderer": "Arnold(mtoa)"},
+  "dcc": {"app": "Maya", "version": "2022", "renderer": "Arnold(mtoa 4.2.4)"},
+  "paths": {
+    "model": "M:/show/GNS/assets/veh/volvo/model/pub/data/abc",
+    "shader": "M:/show/GNS/assets/veh/volvo/shader/pub/v002",
+    "texture": "M:/show/GNS/assets/veh/volvo/texture/pub/v002",
+    "lookdev": "M:/show/GNS/assets/veh/volvo/lookdev/pub/scenes"
+  },
   "files": [
     {"role": "model", "filename": "volvo_model_v002.abc", "format": "abc"},
     {"role": "shader", "filename": "volvo_shader_v002.mb", "format": "mayaBinary"}
   ],
   "textures": [
     {
-      "filename": "volvo_body_diff.1001.tif", "file_node": "file1",
+      "filename": "volvo_body_diff.1001.tif",
+      "path": "M:/show/GNS/assets/veh/volvo/texture/pub/v002/volvo_body_diff.1001.tif",
+      "file_node": "file1",
       "colorspace": "sRGB", "uv_tiling_mode": 3, "udim": true,
       "shading_engines": ["volvo_body_SG"]
     }
@@ -172,9 +183,13 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 }
 ```
 
-- `textures` 항목의 colorspace / uvTilingMode / UDIM / 쉐이딩엔진 연결 정보는
-  `dl_publish_for_asset._publish_textures()`가 이미 읽고 있는 값을 기록만 추가하여 확보합니다.
+- `paths`는 역할별 산출물 기준 폴더입니다. `files`의 각 항목은 `paths[role]` 아래에 있고,
+  `textures`의 각 항목은 절대 경로(`path`)를 직접 가집니다. 후속 아카이빙 잡은 이 경로들로
+  업로드할 파일을 찾습니다.
+- `textures` 항목의 colorspace / uvTilingMode / UDIM / 쉐이딩엔진 연결 정보는 텍스쳐 퍼블리시
+  이후의 씬을 다시 순회하여 수집합니다. (`_collect_texture_records()`)
   이 정보가 "다른 DCC·다른 프로젝트에서 달라붙이기"의 핵심입니다.
+- file 노드는 원본 확장자 텍스쳐를 참조하므로 `.tx` 파생 파일은 목록에서 자연 제외됩니다.
 - `shader_assign`은 기존 `_data.json`(쉐이딩엔진 → 오브젝트 매핑)과 동일 데이터입니다.
 - `schema_version`으로 향후 스키마 진화를 관리합니다.
 
@@ -207,8 +222,9 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 ## 4. 구현 마일스톤
 
-1. **M1 — manifest 생성**: `dl_publish_for_asset`에 텍스쳐 노드 정보 수집 + manifest 저장 추가.
-   단위 테스트(스키마 검증).
+1. **M1 — manifest 생성** ✅ (2026-08-26 완료): 공용 모듈 `flova/shotgrid/total_library.py` 추가,
+   `dl_publish_for_asset`에 텍스쳐 노드 정보 수집(`_collect_texture_records`) +
+   manifest 저장(`_publish_library_manifest`, 쉐이더 펍 폴더) 단계 연결. 단위 테스트 완료.
 2. **M2 — TotalLibraryRegistrar**: find_or_create / 역할별 Attachment 교체 / 업로드 공용 모듈.
    SG mock 단위 테스트.
 3. **M3 — dl_register_total_library**: Deadline 플러그인 구현.
@@ -231,14 +247,14 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 ---
 
-## 6. 결정 필요 사항 (미확정)
+## 6. 확정된 설계 결정
 
-| # | 항목 | 권장안 | 상태 |
+| # | 항목 | 확정 내용 | 확정일 |
 | --- | --- | --- | --- |
-| 1 | 항목 식별 키 | `{프로젝트}_{에셋코드}` (프로젝트가 다르면 같은 에셋도 별도 항목) | 결정 대기 |
-| 2 | `.tx` 업로드 여부 | 제외 (재생성 가능한 파생물) | 결정 대기 |
-| 3 | 신규 필드 `Source Project`(`sg_source_project`), `Source Version`(`sg_source_version`) | 생성 | 결정 대기 |
-| 4 | 아카이빙 동작 방식 | 항상 자동 실행 (UI 체크박스 없음) | 결정 대기 |
+| 1 | 항목 식별 키 | `{프로젝트}_{에셋코드}` (프로젝트가 다르면 같은 에셋도 별도 항목) | 2026-08-26 |
+| 2 | `.tx` 업로드 여부 | 제외 (재생성 가능한 파생물. file 노드가 원본 확장자를 참조하므로 manifest에서 자연 제외됨) | 2026-08-26 |
+| 3 | 신규 필드 `Source Project`(`sg_source_project`), `Source Version`(`sg_source_version`) | 생성 (M5 배포 전 ShotGrid에서 필드 먼저 생성) | 2026-08-26 |
+| 4 | 아카이빙 동작 방식 | 항상 자동 실행 (UI 체크박스 없음) | 2026-08-26 |
 
 ---
 
@@ -247,3 +263,4 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | 날짜 | 내용 |
 | --- | --- |
 | 2026-08-26 | 최초 작성: TOTAL_LIBRARY 구조 실측 정리 + 펍툴 자동 아카이빙 설계·계획 수립 |
+| 2026-08-26 | 설계 결정 4건 확정. manifest 스키마에 `paths` 섹션과 텍스쳐 `path` 필드 추가. M1 구현 완료 반영 |
