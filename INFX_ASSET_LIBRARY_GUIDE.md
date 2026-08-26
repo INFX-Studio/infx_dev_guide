@@ -113,7 +113,7 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 | 필드 | 값 |
 | --- | --- |
-| `sg_name` | 에셋 코드 (사람이 읽는 이름, 수동 수정 허용) |
+| `sg_name` | 에셋 코드 (⚠️ 재펍 덮어쓰기 시 함께 초기화됨 — 수동 수정은 유지되지 않음. `tags`도 동일) |
 | `sg_asset_type` | 프로젝트 Asset의 `sg_asset_type` |
 | `sg_dcc` | `Maya` |
 | `sg_path_to_package` | 프로젝트 룩뎁 펍 폴더 (참고용 — 원본 파일은 Attachment) |
@@ -218,6 +218,10 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
   - `dl_publish_for_asset`에 manifest 작성 단계를 추가합니다. (쉐이더 펍 폴더에 저장)
 - 리깅 펍: `RiggingPubToolsWindow.publish()`의 로컬 펍 성공 후 잡을 제출합니다.
   업로드가 커도 작업자 Maya 세션을 막지 않습니다.
+  - ⚠️ 캡쳐 이미지는 작업자 로컬 temp에 생성되므로, 렌더팜 워커가 읽을 수 있도록
+    리깅 펍 폴더(네트워크)에 `{에셋코드}_rig_thumbnail.jpg`로 복사한 경로를 잡에 전달합니다.
+  - registrar는 업로드 파일과 썸네일의 존재를 Attachment 교체 전에 검증하므로,
+    파일 누락 시 ShotGrid 무변경 상태로 잡이 실패하고 재시도로 복구할 수 있습니다.
 - 실패 격리: 아카이빙 잡이 실패해도 프로젝트 퍼블리시는 성공으로 유지되고,
   Deadline에서 해당 잡만 재시도하면 복구됩니다.
 - 공용 로직은 `flova/shotgrid/total_library.py`(가칭) `TotalLibraryRegistrar`로 모아
@@ -236,9 +240,10 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
    kind 분기).
 4. **M4 — 펍툴 연결** ✅ (2026-08-26 완료): 에셋 펍은 `publish_action()`에서 본 펍 잡에 의존하는
    후속 잡으로 제출, 리깅 펍은 `_submit_total_library_archive()`에서 rig manifest 생성 후 잡 제출.
-5. **M5 — 검증·배포**: 신규 SG 필드 생성 ✅ → 라이브 e2e ✅ (등록 → 재펍 덮어쓰기 시 Attachment
-   전량 교체 → rig 등록 시 asset 산출물 보존 확인, 테스트 데이터 정리 완료) → Oracle 검증 →
-   배포(W:/inhouse).
+5. **M5 — 검증** ✅ (2026-08-26 완료): 신규 SG 필드 생성 ✅ → 라이브 e2e ✅ (등록 → 재펍
+   덮어쓰기 시 Attachment 전량 교체 → rig 등록 시 asset 산출물 보존 확인, 테스트 데이터 정리
+   완료) → Oracle 검증 ✅ (goal OK / 품질 PASS / 보안 PASS / 아키텍처 blocking 1건 → 리깅
+   썸네일 네트워크 복사로 수정 후 재검증 PASS). 남은 절차: 배포(W:/inhouse) 및 폐쇄망 동기화.
 
 ---
 
@@ -250,6 +255,16 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 - 업로드 용량: 텍스쳐 세트는 수백 MB~수 GB가 될 수 있어 `sg` 풀에서 처리하고,
   잡 로그에 파일 수/총 용량을 남깁니다. 사이트별 대용량 단일 파일 제한은 e2e에서 실측 확인합니다.
 - `SGLibraryCache.SG_LIBRARY_PAGE_LIST`의 `Material` 누락 보완을 권장합니다.
+- 알려진 한계 (Oracle 검증에서 확인, 비-blocking):
+  - 업로드 직후 `sg_type` 기록 전에 잡이 중단되면 타입 없는 Attachment가 남을 수 있습니다.
+    타입 없는 첨부는 수동/레거시 파일을 보호하기 위해 자동 삭제하지 않으므로, 발견 시 수동 정리합니다.
+  - 같은 에셋의 에셋 아카이빙 잡과 리깅 아카이빙 잡이 최초 등록 시점에 동시 실행되면
+    이론상 같은 code의 Version이 중복 생성될 수 있습니다. (역할별 Attachment는 분리되어
+    데이터 충돌은 없음, 발생 확률 매우 낮음)
+  - rig manifest 파일이름은 버전 없이 고정이므로 연속 리깅 펍 시 대기 중이던 이전 잡이
+    최신 manifest를 읽을 수 있습니다. delete → upload 멱등 설계라 최종 상태는 최신본으로 수렴합니다.
+  - 재펍 덮어쓰기는 `sg_name`, `tags`, `description`을 함께 초기화합니다. 라이브러리 담당자의
+    수동 큐레이션을 보존하려면 별도 필드 분리가 필요합니다. (후속 결정 사항)
 - 📌 **참고**: ShotGrid 커넥션 사용법은 `INFX_SHOTGRID_GUIDE.md`, Deadline 플러그인 작성
   규칙은 `INFX_DEADLINE_PLUGIN_GUIDE.md`를 참고하십시오.
 
@@ -272,3 +287,4 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | --- | --- |
 | 2026-08-26 | 최초 작성: TOTAL_LIBRARY 구조 실측 정리 + 펍툴 자동 아카이빙 설계·계획 수립 |
 | 2026-08-26 | 설계 결정 4건 확정. manifest 스키마에 `paths` 섹션과 텍스쳐 `path` 필드 추가. M1 구현 완료 반영 |
+| 2026-08-26 | M2~M5 완료. Oracle 검증 통과(리깅 썸네일 blocking 수정 포함). 알려진 한계·리깅 썸네일 복사 규칙·파일 사전검증 규칙 추가 |
