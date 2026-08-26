@@ -123,10 +123,9 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | `user` | 퍼블리시한 작업자 |
 | 썸네일 (`image`) | 리깅 캡쳐 이미지 또는 프로젝트 Version 썸네일(있는 경우) |
 
-- 신규 필드(선택 권장, **코드 배포 전 생성 필요**):
+- 신규 필드 (✅ 2026-08-26 ShotGrid에 생성 완료):
   - `Source Project` (`sg_source_project`, text): 예 `GNS`
   - `Source Version` (`sg_source_version`, text): 예 `volvo_lookdev_v002`
-  - 생략 시 description/tags로 대체 가능하나, 페이지 필터링에는 전용 필드가 유리합니다.
 
 ### 3.3 Attachment(File) 구성 — 역할별 `sg_type` 태깅
 
@@ -203,11 +202,17 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 4. 썸네일 갱신.
 
 - 역할 단위 "delete → upload" 순서이므로 잡을 재시도해도 결과가 같습니다(멱등).
+- 업로드할 파일이 하나라도 없으면 기존 Attachment를 삭제하기 전에 실패시켜,
+  파일 누락 상태에서 라이브러리가 비워지는 일을 막습니다.
+- Version 필드 소유권: `sg_scan_source_path`, `sg_source_version`, `sg_path_to_package` 등
+  provenance 필드는 **에셋 펍이 관리**합니다. 리깅 펍은 rig 역할 Attachment만 교체하고
+  Version 필드는 작업자(`user`) 외에는 갱신하지 않으며, 항목이 없으면 기본 정보로 생성만 합니다.
 
 ### 3.6 실행 구조
 
-- 신규 Deadline 플러그인 `dl_register_total_library` (pure Python, `pool='sg'`, Maya 불필요):
-  manifest를 읽어 3.5의 갱신 규칙을 수행하는 공용 실행기입니다.
+- 신규 Deadline 플러그인 `dl_py_register_total_library` (pure Python, `pool='sg'`, Maya 불필요):
+  manifest를 읽어 3.5의 갱신 규칙을 수행하는 공용 실행기입니다. kind(asset/rig)에 따라
+  등록 로직을 분기합니다. (`INFX_DEADLINE_PLUGIN_GUIDE.md`의 `dl_py_` 접두사 규칙 적용)
 - 에셋 펍: `AssetPubToolsWindow.publish_action()`에서 기존 펍 잡(`dl_publish_for_asset`)에
   `dependency_files`로 연결된 후속 잡으로 제출합니다. (기존 노트 잡과 같은 패턴)
   - `dl_publish_for_asset`에 manifest 작성 단계를 추가합니다. (쉐이더 펍 폴더에 저장)
@@ -225,12 +230,15 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 1. **M1 — manifest 생성** ✅ (2026-08-26 완료): 공용 모듈 `flova/shotgrid/total_library.py` 추가,
    `dl_publish_for_asset`에 텍스쳐 노드 정보 수집(`_collect_texture_records`) +
    manifest 저장(`_publish_library_manifest`, 쉐이더 펍 폴더) 단계 연결. 단위 테스트 완료.
-2. **M2 — TotalLibraryRegistrar**: find_or_create / 역할별 Attachment 교체 / 업로드 공용 모듈.
-   SG mock 단위 테스트.
-3. **M3 — dl_register_total_library**: Deadline 플러그인 구현.
-4. **M4 — 펍툴 연결**: 에셋 펍 후속 잡 제출 + 리깅 펍 후 잡 제출. 리깅용 rig_manifest 생성.
-5. **M5 — 검증·배포**: 신규 SG 필드 생성(코드 배포 전) → 테스트 에셋 e2e(등록 → 재펍
-   덮어쓰기 → Attachment 교체 확인) → Oracle 검증 → 배포.
+2. **M2 — TotalLibraryRegistrar** ✅ (2026-08-26 완료): find_or_create / 역할별 Attachment 교체 /
+   업로드 공용 모듈 (`flova/shotgrid/total_library.py`). SG mock 단위 테스트 완료.
+3. **M3 — dl_py_register_total_library** ✅ (2026-08-26 완료): Deadline 플러그인 구현 (asset/rig
+   kind 분기).
+4. **M4 — 펍툴 연결** ✅ (2026-08-26 완료): 에셋 펍은 `publish_action()`에서 본 펍 잡에 의존하는
+   후속 잡으로 제출, 리깅 펍은 `_submit_total_library_archive()`에서 rig manifest 생성 후 잡 제출.
+5. **M5 — 검증·배포**: 신규 SG 필드 생성 ✅ → 라이브 e2e ✅ (등록 → 재펍 덮어쓰기 시 Attachment
+   전량 교체 → rig 등록 시 asset 산출물 보존 확인, 테스트 데이터 정리 완료) → Oracle 검증 →
+   배포(W:/inhouse).
 
 ---
 
