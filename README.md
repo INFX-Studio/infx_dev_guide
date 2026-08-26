@@ -59,6 +59,7 @@ inFX 스타일에 맞는 코드를 생성한다.
 | [`INFX_DEADLINE_PLUGIN_GUIDE.md`](INFX_DEADLINE_PLUGIN_GUIDE.md) | Deadline 렌더 플러그인 개발 규칙 |
 | [`INFX_URL_HANDLER_GUIDE.md`](INFX_URL_HANDLER_GUIDE.md) | `flovac://`, `flovaw://` 커스텀 프로토콜 시스템 |
 | [`INFX_ATTENDANCE_SYSTEM_GUIDE.md`](INFX_ATTENDANCE_SYSTEM_GUIDE.md) | 출퇴근 SaaS 시스템 구조 및 설계 |
+| [`INFX_ASSET_LIBRARY_GUIDE.md`](INFX_ASSET_LIBRARY_GUIDE.md) | TOTAL_LIBRARY 에셋 라이브러리 구조 및 펍툴 자동 아카이빙 설계 |
 
 ### 📖 문서 & 참고
 
