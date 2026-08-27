@@ -229,7 +229,53 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 ---
 
-## 4. 구현 마일스톤
+## 4. 라이브러리에서 가져오기 (임포트)
+
+### 4.1 실행 방법 (ShotGrid AMI)
+
+- TOTAL_LIBRARY 프로젝트의 Asset Library 페이지에서 항목을 선택하고
+  우클릭 → **에셋 라이브러리 임포트** (AMI id 727, `infxw://asset_library_import`)
+- AMI는 TOTAL_LIBRARY 프로젝트에만 표시되며, 다른 프로젝트/타입 항목을 선택하면
+  안내 후 종료합니다. 여러 항목 선택 시 첫 번째 항목만 불러옵니다.
+
+### 4.2 임포트 툴 (flova/app/asset_library_import.py)
+
+- UI는 `flova.ui.pyside2`의 Flova- 위젯으로 구성합니다.
+  (FlovaMainWindow, FlovaProjectComboBox, FlovaGroupBox, FlovaTableWidget 등)
+- 라이브러리 정보(전체 필드)와 구성 파일(역할/파일이름/크기) 목록을 표시합니다.
+- 임포트 설정:
+  - **프로젝트**: 반드시 사용자가 선택해야 합니다. (FlovaProjectComboBox)
+  - **에셋 타입 / 에셋 코드**: 라이브러리 저장값이 기본값이며 수정할 수 있습니다.
+  - **태스크 코드**: 기본값 `lookdev`.
+  - **DCC**: 기본값 `Maya`. Maya 외 DCC는 파일 배치와 ShotGrid 등록까지 처리합니다.
+  - **ShotGrid 등록**: 체크 시(기본값) 대상 프로젝트에 Asset / Task / Version을 바로 등록합니다.
+  - **저장 위치 보기**: 기본값 숨김. 체크하면 프로젝트 템플릿으로 계산된
+    마야 씬 / 모델링 / 쉐이더 / 텍스쳐 / 리깅 저장 위치를 보여줍니다.
+- 버전은 대상 프로젝트의 기존 Version code(`{에셋}_{태스크}_v###`)를 조회해 다음 번호를 사용합니다.
+
+### 4.3 렌더팜 처리 (dl_maya_import_total_library)
+
+임포트 실행 시 렌더팜(mayapy) 잡이 다음을 수행합니다.
+
+1. 라이브러리 Version의 Attachment를 대상 프로젝트 템플릿 경로에 다운로드
+   (파일이름은 대상 에셋 코드 컨벤션으로 변경, 텍스쳐는 원본 이름 유지)
+2. DCC가 Maya면 manifest로 마야 씬 재구성:
+   모델링 abc 임포트 → `{에셋코드}_mod_grp` 그룹 → 쉐이더 임포트 → 쉐이딩엔진-오브젝트
+   어싸인 → 텍스쳐 경로/colorspace/uvTilingMode 연결 → 메쉬 Arnold 속성 적용 →
+   `{에셋}_{태스크}_v###.mb` 저장
+3. ShotGrid 등록(선택 시): Asset/Task는 find-or-create, Version은 신규 생성
+   (`sg_path_to_package`=마야 씬, `sg_scan_source_path`=`TOTAL_LIBRARY:{라이브러리 코드}`,
+   description에 출처 기록)
+4. 완료 시 Mattermost 알림
+
+- 공용 로직은 `flova/shotgrid/total_library.py`의 `fetch_library_item`,
+  `TotalLibraryImportPlanner`(다운로드 계획/다음 버전/등록)에 있습니다.
+- AMI 진입은 `sg_ami/plugins/asset_library_import.py`(thin wrapper) →
+  `flova.app.asset_library_import.plugin_start()` 경로입니다.
+
+---
+
+## 5. 구현 마일스톤
 
 1. **M1 — manifest 생성** ✅ (2026-08-26 완료): 공용 모듈 `flova/shotgrid/total_library.py` 추가,
    `dl_publish_for_asset`에 텍스쳐 노드 정보 수집(`_collect_texture_records`) +
@@ -247,7 +293,7 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 ---
 
-## 5. 운영 고려사항 / 주의사항
+## 6. 운영 고려사항 / 주의사항
 
 - ⚠️ **ShotGrid 스키마 작업 순서**: 신규 필드는 반드시 코드 배포보다 먼저 생성해야 합니다.
   없는 field code를 전송하면 업로드가 실패할 수 있습니다.
@@ -270,7 +316,7 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 ---
 
-## 6. 확정된 설계 결정
+## 7. 확정된 설계 결정
 
 | # | 항목 | 확정 내용 | 확정일 |
 | --- | --- | --- | --- |
@@ -281,10 +327,11 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 ---
 
-## 7. 문서 이력
+## 8. 문서 이력
 
 | 날짜 | 내용 |
 | --- | --- |
 | 2026-08-26 | 최초 작성: TOTAL_LIBRARY 구조 실측 정리 + 펍툴 자동 아카이빙 설계·계획 수립 |
 | 2026-08-26 | 설계 결정 4건 확정. manifest 스키마에 `paths` 섹션과 텍스쳐 `path` 필드 추가. M1 구현 완료 반영 |
 | 2026-08-26 | M2~M5 완료. Oracle 검증 통과(리깅 썸네일 blocking 수정 포함). 알려진 한계·리깅 썸네일 복사 규칙·파일 사전검증 규칙 추가 |
+| 2026-08-27 | `.ass`는 생성된 경우에만 manifest에 포함하도록 수정. 임포트 기능 추가(4장): AMI 임포트 툴, 렌더팜 임포트 플러그인, AMI(id 727) 등록 |
