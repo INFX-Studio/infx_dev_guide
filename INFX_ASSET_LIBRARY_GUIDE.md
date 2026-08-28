@@ -133,10 +133,11 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | --- | --- | --- |
 | `manifest_asset` | `{acode}_asset_manifest.json` (통합 메타데이터) | 에셋 펍 |
 | `model` | `{acode}_model_{ver}.abc`, `.fbx`, `_blendshape.mb`(있으면) | 에셋 펍 |
-| `shader` | `{acode}_shader_{ver}.mb`, `.ass`, `_data.json`, `_meta.json` | 에셋 펍 |
-| `texture` | 씬에서 사용된 모든 텍스쳐 원본 (UDIM 전체 타일 포함) | 에셋 펍 |
+| `shader` | `{acode}_shader_{ver}.mb`, `.ass`(생성된 경우만), `_data.json`, `_meta.json` | 에셋 펍 |
+| `texture` | 씬에서 사용된 모든 텍스쳐 원본 (UDIM 전체 타일 포함, `file`·`aiImage` 노드 대상) | 에셋 펍 |
+| `lookdev` | 룩뎁 펍 씬 원본 `{acode}_{tcode}_{ver}.mb` (임포트 시 원본 우선 리패스용) | 에셋 펍 |
 | `manifest_rig` | `{acode}_rig_manifest.json` | 리깅 펍 |
-| `rig` | 리깅 펍 `.mb` | 리깅 펍 |
+| `rig` | 리깅 펍 `.mb` (텍스쳐는 아카이브하지 않음 — 룩뎁 텍스쳐 덮어쓰기 방지) | 리깅 펍 |
 
 - 텍스쳐 업로드 원칙: **파일이름이 다른 에셋과 같아도 해당 에셋 항목에 전부 업로드**합니다.
   (Attachment는 엔티티별 독립 저장이므로 자연 충족, 에셋 간 중복 제거 없음)
@@ -185,6 +186,13 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 - `paths`는 역할별 산출물 기준 폴더입니다. `files`의 각 항목은 `paths[role]` 아래에 있고,
   `textures`의 각 항목은 절대 경로(`path`)를 직접 가집니다. 후속 아카이빙 잡은 이 경로들로
   업로드할 파일을 찾습니다.
+- 추가 기록 항목 (schema_version 1 유지, 임포터는 있으면 사용):
+  - `files` role에 `lookdev`(룩뎁 펍 씬 원본) 추가, 각 항목에 `size`(byte) 기록
+  - `textures` 항목에 `node_type`(`file`/`aiImage`)과 `size` 기록
+  - `shader_assign_components`: 쉐이딩엔진 → 멤버 원본 매핑 (페이스 컴포넌트 표기 포함)
+  - `dcc`에 `scene_unit`, `fps`, `ocio_config` 기록 (rig manifest 포함)
+- 원본 프로젝트 Version의 썸네일과 설명은 아카이빙 잡이 라이브러리 Version에
+  자동 승계·병기합니다. (`share_thumbnail`, 리깅 캡쳐가 있으면 캡쳐가 우선)
 - `textures` 항목의 colorspace / uvTilingMode / UDIM / 쉐이딩엔진 연결 정보는 텍스쳐 퍼블리시
   이후의 씬을 다시 순회하여 수집합니다. (`_collect_texture_records()`)
   이 정보가 "다른 DCC·다른 프로젝트에서 달라붙이기"의 핵심입니다.
@@ -259,10 +267,14 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 
 1. 라이브러리 Version의 Attachment를 대상 프로젝트 템플릿 경로에 다운로드
    (파일이름은 대상 에셋 코드 컨벤션으로 변경, 텍스쳐는 원본 이름 유지)
-2. DCC가 Maya면 manifest로 마야 씬 재구성:
-   모델링 abc 임포트 → `{에셋코드}_mod_grp` 그룹 → 쉐이더 임포트 → 쉐이딩엔진-오브젝트
-   어싸인 → 텍스쳐 경로/colorspace/uvTilingMode 연결 → 메쉬 Arnold 속성 적용 →
-   `{에셋}_{태스크}_v###.mb` 저장
+2. DCC가 Maya면 마야 씬 준비:
+   - **룩뎁 원본(`lookdev` 역할)이 아카이브되어 있으면 원본 씬을 열어 텍스쳐만
+     대상 경로로 리패스 후 저장** — 라이트·컨스트레인트·페이스 단위 어싸인까지 보존
+   - 원본이 없는 기존 등록분은 manifest로 재구성:
+     모델링 abc 임포트 → `{에셋코드}_mod_grp` 그룹 → 쉐이더 임포트 → 어싸인
+     (`shader_assign_components`의 페이스 컴포넌트 우선) → 텍스쳐 경로/colorspace/
+     uvTilingMode 연결(`aiImage`는 filename 속성) → 메쉬 Arnold 속성 적용 →
+     `{에셋}_{태스크}_v###.mb` 저장
 3. ShotGrid 등록(선택 시): Asset/Task는 find-or-create, Version은 신규 생성
    (`sg_path_to_package`=마야 씬, `sg_scan_source_path`=`TOTAL_LIBRARY:{라이브러리 코드}`,
    description에 출처 기록)
@@ -335,3 +347,4 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | 2026-08-26 | 설계 결정 4건 확정. manifest 스키마에 `paths` 섹션과 텍스쳐 `path` 필드 추가. M1 구현 완료 반영 |
 | 2026-08-26 | M2~M5 완료. Oracle 검증 통과(리깅 썸네일 blocking 수정 포함). 알려진 한계·리깅 썸네일 복사 규칙·파일 사전검증 규칙 추가 |
 | 2026-08-27 | `.ass`는 생성된 경우에만 manifest에 포함하도록 수정. 임포트 기능 추가(4장): AMI 임포트 툴, 렌더팜 임포트 플러그인, AMI(id 727) 등록 |
+| 2026-08-28 | 데이터 보강: 룩뎁 원본 아카이브(`lookdev` 역할)·임포트 원본 우선 리패스, 원본 썸네일 승계·설명 병기, 페이스 단위 어싸인 기록, `aiImage` 텍스쳐 지원(프로젝트 펍 포함), 씬 단위·FPS·OCIO·파일 크기 기록. 리깅 텍스쳐는 아카이브 제외로 확정 |
