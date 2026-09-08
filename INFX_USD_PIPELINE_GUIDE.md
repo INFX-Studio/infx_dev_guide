@@ -63,10 +63,11 @@ inFX 제작 파이프라인의 USD(OpenUSD) 전환을 위한 자료조사, 준�
 | DCC | 버전 | 용도 | USD 지원 여부 |
 | --- | --- | --- | --- |
 | Maya | 2024 (전 사이트 설치 완료), 2022 코드 잔존 | 모델·룩뎁·리깅·레이아웃·애니메이션·매치무브·라이팅 | mayaUsd 지원 (2023+) |
-| Houdini | 20.5 (일부 19.5) | 라이팅, FX | Solaris 네이티브 지원 |
+| Houdini | 20.5 (일부 19.5), Python 3.11.7, USD 24.03 | 라이팅, FX | Solaris 네이티브 지원 |
 | Nuke | 14.1 주력, 15.x 일부 | 컴프, 매치무브 언디스토트, 프리컴프 | 15.0+ 기본 지원, 14.x 미지원 |
 | 3DEqualizer | - | 매치무브 | 해당 없음 (카메라는 Maya 경유) |
 | Unreal | - | 별도 연동 모듈 존재 | 네이티브 USD 지원 |
+| Katana | 7.0v4, Python 3.10, USD 23.05 (`fnpxr`) | 라이팅·렌더 (Arnold) | 네이티브 USD 지원 |
 
 ### 2.2 데이터 교환 방식
 
@@ -323,8 +324,65 @@ USD 단점
 
 ## 4. 전환 준비
 
-- (작성 예정) 필요한 빌드/배포 환경 (USD 빌드 버전, Python 버전, 플러그인)
 - (작성 예정) Asset Resolver 전략 (경로 해석, 버저닝)
+
+### 4.0 빌드/배포 환경
+
+#### 4.0.1 USD 실행 환경 현황
+
+| 환경 | Python | 내장 USD | Python 패키지명 | 비고 |
+| --- | --- | --- | --- | --- |
+| Maya 2024 + mayaUsd 0.25.0 | 3.10.8 | 22.11 | `pxr` | 실측 (`mayapy`) |
+| Houdini 20.5 | 3.11.7 | 24.03 | `pxr` | 문서 기준, 로컬 미설치로 미실측 ([참고](https://www.sidefx.com/docs/houdini/news/20_5/platforms.html)) |
+| Katana 7.0 | 3.10 | 23.05 | `fnpxr` | `pxr`와 이름 충돌 회피용으로 Foundry가 의도적으로 분리 ([참고](https://learn.foundry.com/katana/Content/release_notes/7.0/Katana_7.0v1_ReleaseNotes.html)) |
+| 사내 표준 Python | 3.10.11 | 없음 | - | `C:\Programs\Python310`, Deadline 플러그인은 `W:\inhouse\python\python3.10.11` 사용 |
+
+#### 4.0.2 DCC 밖 USD 처리용 패키지: `usd-core` (pip)
+
+- 실측 (2026-09-08, Python 3.10, Windows)
+  - `usd_core-26.8-cp310-none-win_amd64.whl` 13.8 MB, 의존 패키지 없음
+  - `pip download` → `--no-index --find-links` 오프라인 설치 성공 (기존 `W:\inhouse\pypi-wheels` 절차 그대로)
+  - `from pxr import Usd` → Stage 생성·usda 출력 정상. 설치 용량 49 MB
+  - Rocky 8 서버용 manylinux_2_28 wheel 제공 (glibc 2.28 호환)
+- 결론: 폐쇄망 배포에 장애 없음. wheel 한 개 추가로 끝
+
+#### 4.0.3 DCC 내장 USD와의 충돌 (실측)
+
+- 충돌 원리: `pxr` 패키지 이름이 같음. `sys.path`에서 먼저 잡히는 쪽이 import됨. DCC 내장 USD와 다른 버전의 `pxr`가 먼저 로드되면 DCC 플러그인의 Python 바인딩이 깨짐
+- Maya 2024 실측 결과
+
+| 케이스 | 결과 |
+| --- | --- |
+| usd-core `pxr`가 mayaUsd보다 먼저 잡힘 (예: `flova_libs_maya2024`에 설치) | **충돌**. `mayaUsd.lib` import 시 `Tf_PyEnumWrapper has not been created yet` RuntimeError, 이중 등록 RuntimeWarning 다수. `Sdf`는 26.8, 플러그인은 22.11로 뒤섞임 |
+| mayaUsd 먼저 로드 후 usd-core 경로를 뒤에 추가 | 정상. 이미 import된 Maya `pxr` 유지 |
+| 외부 Python이 usd-core import 후 `mayapy` 자식 프로세스 실행 (PYTHONPATH 미상속) | 정상. usd-core가 부모 `PATH`에 자기 `pxr` 폴더를 추가하나, mayaUsd `.mod`가 자기 lib를 앞에 두므로 자식은 22.11 로드 |
+| 외부 Python이 usd-core import 후 `mayapy` 실행 (PYTHONPATH 상속) | **충돌**. 자식이 26.8 `pxr` 로드 |
+
+- Houdini 20.5 (문서·커뮤니티 근거, 미실측)
+  - Houdini는 `PYTHONPATH` 항목을 자기 라이브러리보다 앞에 둠. `pxr`가 `PYTHONPATH`에 있으면 Solaris가 그것을 먼저 잡음
+  - Python 3.11이라 cp310 wheel은 로드 자체가 실패 → ABI 크래시 대신 ImportError로 LOP Python 노드·Solaris 도구 오작동
+  - SideFX·커뮤니티 모두 "외부 USD를 `PYTHONPATH`·`PATH`에 두지 말 것"을 권고 ([참고 1](https://www.sidefx.com/forum/post/383527/), [참고 2](https://www.sidefx.com/forum/topic/81272/))
+- Katana 7.0: `fnpxr`로 이름이 분리돼 `pxr` 충돌 없음. 단 `katana7.0_v4.bat`이 `C:\Programs\Python310\Lib\site-packages`를 `PYTHONPATH`에 넣고 있어, 다른 바이너리 패키지 충돌 위험은 별도 존재 (pip 가이드 6.2 규칙 위반)
+
+#### 4.0.4 현재 런처의 `PYTHONPATH` 구성
+
+| 런처 | PYTHONPATH | usd-core 노출 여부 |
+| --- | --- | --- |
+| `houdini20.5.bat` | `W:\inhouselova;W:\inhouselova_libs` | flova_libs에만 안 넣으면 안전 |
+| `maya2024*.bat` | `flova;flova\maya\startup;W:\inhouse\pymel;W:\inhouselova_libs_maya2024` | flova_libs_maya2024에만 안 넣으면 안전 |
+| `katana7.0_v4.bat` | `flova;W:\inhouselova_libs;C:\Programs\Python310\Lib\site-packages` | 로컬 site-packages 노출. `fnpxr`라 usd-core 자체는 무해 |
+| 일반 Python 도구 (`*.bat` 23종) | `flova;W:\inhouselova_libs` | usd-core를 쓰려면 별도 경로 추가 필요 |
+
+#### 4.0.5 배치 원칙 (결정)
+
+- DCC 안: 반드시 DCC 내장 USD 사용. usd-core를 DCC `PYTHONPATH`에 절대 올리지 않음
+- DCC 밖 (표준 Python, Deadline 플러그인): usd-core 사용
+- usd-core 설치 위치: DCC `PYTHONPATH`에 포함되지 않는 **전용 디렉터리**
+  - `W:\inhouselova_libs`, `flova_libs_maya2024`에 설치 금지
+  - 후보: `W:\inhouselova_libs_usd` (공유, 자리별 설치 불필요) 또는 로컬 `C:\Programs\Python310\Lib\site-packages` (pip 가이드 6.2)
+- 외부 Python에서 DCC를 자식 프로세스로 띄울 때: usd-core 경로가 `PYTHONPATH`로 상속되지 않도록 env에서 제거
+- usd-core로 쓰는 파일은 Maya 2024(22.11)가 읽을 수 있도록 22.x 범위 스키마만 사용. 신규 스키마·기능은 구버전에서 무시됨
+- `katana7.0_v4.bat`의 로컬 site-packages 노출은 별도 정리 대상
 - (작성 예정) 레이어 구조 표준안
 - (작성 예정) 기존 데이터 마이그레이션 방안
 
