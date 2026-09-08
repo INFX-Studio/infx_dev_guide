@@ -429,6 +429,63 @@ USD 단점
 - ShotGrid 승인 상태로 버전을 고르는 등 DB 조회가 경로 해석에 들어갈 때
 - 그 전까지는 불필요
 
+### 4.0.8 레이어 구조 표준안 (결정)
+
+**전제 (조사 결과)**
+
+- 렌더러: Arnold. 룩뎁 산출물은 Arnold 셰이더 + 쉐이딩 엔진 할당(json) + 텍스처
+- MtoA(Maya 2024)에 arnold-usd 동봉 (USD 22.11 빌드): `usd_proc.dll`(USD 직접 렌더), Hydra 딜리게이트, mayaUsd용 Arnold 머티리얼 익스포터
+- mayaUsd에 `usdAbc`(.abc 직접 참조), `usdMtlx` 동봉
+- 리그는 Maya 디포머·컨트롤러라 USD 스키마로 표현 불가
+
+**에셋 레이어 (위가 강함)**
+
+```
+%ASSET_PATH%/usd/%ASSET_CODE%.usd            ← 진입점. /%ASSET_CODE% prim + payload
+└ %ASSET_PATH%/usd/%ASSET_CODE%_payload.usd  ← sublayer 스택만 가진 빈 레이어
+   ├ lookdev/pub/data/usd/%VERSION%/..._lookdev_....usd  (강) 머티리얼 + 바인딩 over
+   └ model/pub/data/usd/%VERSION%/..._model_....usd      (약) 지오메트리 정의
+```
+
+- 진입점은 payload 하나만 가짐. 샷에서 수백 에셋을 열 때 지오메트리를 필요할 때만 로드
+- 룩뎁 레이어는 지오메트리를 다시 쓰지 않고 `over`로 머티리얼만 얹음. 모델 버전이 올라가도 룩뎁 레이어 재사용
+- 퍼블리시 시 펍툴이 `_payload.usd`의 sublayer 경로를 새 버전으로 재작성
+- 리그 스텝: USD 산출물 없음. `.mb` 유지
+
+**샷 레이어 (위가 강함)**
+
+```
+%SHOT_PATH%/usd/%SHOT_CODE%.usd              ← 샷 진입점. 부서별 sublayer 스택
+ ├ lighting/pub/data/usd/%VERSION%/..._lighting_....usd   라이트, 머티리얼 override
+ ├ fx/pub/data/usd/%VERSION%/..._fx_....usd               시뮬 결과 (.abc/.vdb 참조)
+ ├ animation/pub/data/usd/%VERSION%/..._anim_....usd      geo를 애니 .abc로 교체(over), 카메라
+ └ layout/pub/data/usd/%VERSION%/..._layout_....usd       에셋 배치: /shot/bus1 → reference TEST_TH/assets/cha/bus/usd/bus.usd
+```
+
+- 부서는 자기 레이어 파일만 씀. 샷 진입점은 sublayer 목록만 갱신
+- 애니메이션 레이어: 레이아웃이 놓은 prim에 `over`로 애니 `.abc`를 참조시켜 정지 지오메트리를 캐시로 교체
+- 샷 경로·파일명 규칙은 4.1의 에셋 규칙과 동일 패턴 (`%SHOT_PATH%/usd/`, `%SHOT_CODE%_%TASK_CODE%_%VERSION%.usd`)
+
+**결정 사항**
+
+| 항목 | 결정 |
+| --- | --- |
+| 에셋 합성 | payload + sublayer 스택 (model < lookdev) |
+| 샷 합성 | 샷 진입점 하나에 부서별 sublayer |
+| 룩뎁 머티리얼 | Arnold 노드 그대로 (MtoA 익스포터, 렌더 결과 동일) + 뷰포트용 UsdPreviewSurface 병기 |
+| 리그 스텝 | USD 산출물 없음 |
+| 애니 지오메트리 | `.abc` 캐시를 USD가 참조. USD 타임샘플 직접 export는 추후 이행 검토 |
+
+**쉬운 설명**
+
+- 에셋 = 겉봉투(`bus.usd`) 안에 속봉투(`bus_payload.usd`), 속봉투 안에 모델 종이와 색칠 종이(룩뎁). 색칠 종이는 모델 위에 덧대는 트레이싱지라 모델이 바뀌어도 다시 안 그림
+- 샷 = 레이아웃 → 애니 → FX → 라이팅 순으로 트레이싱지를 쌓음. 위 종이가 아래를 덮음
+- 리그는 Maya 안에서만 존재하는 조종 장치. 조종한 결과(애니 캐시)만 USD에 들어감
+
+### 4.0.9 기존 데이터 마이그레이션 방안
+
+- (작성 예정)
+
 ### 4.1 애셋 퍼블리시 네이밍 규칙 및 디렉터리 구조 (초안)
 
 `flova.maya.app.pub_tools`의 에셋 펍툴/리깅 펍툴이 USD로 저장할 때 적용할 경로·파일이름 규칙. 기존 템플릿(`flova/template/*.yaml`) 변수 체계를 그대로 따르고, USD 전용 요소만 추가하는 방식.
@@ -486,7 +543,6 @@ M:/show/TEST_TH/assets/cha/bus/
 **미결정 사항**
 
 * `.usd` vs `.usda` vs `.usdc` 확장자 표기 컨벤션 최종 확정 (→ [6장](#6-미결정-사항))
-* Payload 분리 기준(무거운 지오메트리를 언제 `%ASSET_CODE%_payload.usd`로 분리할지) 구체화 필요
 
 ## 5. 계획과 방법
 
@@ -567,5 +623,4 @@ M:/show/TEST_TH/assets/cha/bus/
 
 - Python 3.7.7 기준으로 작성된 기존 파이프라인 코드/모듈을 Maya 2024(Python 3.10)에서 어떻게 이관·재검증할지 (전면 재작성 vs 점진적 포팅 등 방식 미정)
 - USD 파일 확장자 표기 컨벤션: `.usd`(위장) vs `.usdc`(바이너리 그대로 표기) vs `.usda`(텍스트) 최종 확정 필요 (→ [4.1절](#41-애셋-퍼블리시-네이밍-규칙-및-디렉터리-구조-초안))
-- Payload 분리 기준(무거운 지오메트리를 언제 별도 Payload 파일로 분리할지) 구체화 필요
 - (작성 예정) 그 외 미결정 항목
