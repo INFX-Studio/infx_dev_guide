@@ -56,10 +56,68 @@ inFX 제작 파이프라인의 USD(OpenUSD) 전환을 위한 자료조사, 준�
 
 ## 2. 현행 파이프라인 현황
 
-- (작성 예정) 현재 사용 중인 DCC와 버전
-- (작성 예정) 현재 데이터 교환 방식 (Alembic, FBX, MA/MB 등)
-- (작성 예정) ShotGrid 연동 구조와 퍼블리시 흐름
-- (작성 예정) 캐시/스토리지 경로 규칙
+- 조사 기준: `flova` 저장소 코드·템플릿 (2026-09-08)
+
+### 2.1 사용 중인 DCC와 버전
+
+| DCC | 버전 | 용도 | USD 지원 여부 |
+| --- | --- | --- | --- |
+| Maya | 2024 (전 사이트 설치 완료), 2022 코드 잔존 | 모델·룩뎁·리깅·레이아웃·애니메이션·매치무브·라이팅 | mayaUsd 지원 (2023+) |
+| Houdini | 20.5 (일부 19.5) | 라이팅, FX | Solaris 네이티브 지원 |
+| Nuke | 14.1 주력, 15.x 일부 | 컴프, 매치무브 언디스토트, 프리컴프 | 15.0+ 기본 지원, 14.x 미지원 |
+| 3DEqualizer | - | 매치무브 | 해당 없음 (카메라는 Maya 경유) |
+| Unreal | - | 별도 연동 모듈 존재 | 네이티브 USD 지원 |
+
+### 2.2 데이터 교환 방식
+
+- Maya 씬: `.mb` 주력, `.ma` 일부
+- 지오메트리·애니메이션 캐시: `.abc` (Alembic)
+- 카메라: `.abc` + `.fbx`
+- 텍스처·셰이더: 버전 폴더 단위 파일 묶음
+- 리뷰: `.mov`
+- 메타데이터: `.json`
+- USD: 현재 미사용
+
+### 2.3 퍼블리시 도구와 ShotGrid 연동
+
+- 퍼블리시 도구: `flova.maya.app.pub_tools` (Maya 내 실행)
+
+| 도구 클래스 | 대상 스텝 | 주요 산출물 |
+| --- | --- | --- |
+| `AssetPubToolsWindow` | model, lookdev | Maya 씬, 모델 .abc 캐시, 셰이더, 텍스처 |
+| `RiggingPubToolsWindow` | rig | Maya 씬, 리깅 캡처 이미지 |
+| `EnvAssetPubToolsWindow` | env | Maya 씬, .fbx |
+| `AnimationPubToolsWindow` | layout, animation | Maya 씬, 카메라, 애니메이션 .abc 캐시 |
+| `MatchmovePubToolsWindow` | layout, matchmove | Maya·Nuke 씬, 카메라, 언디스토트, .mov |
+| `EnvShotPubToolsWindow` | env, env_layout | Maya 씬, 캐시 |
+
+- ShotGrid 연동 흐름
+  - 작업 파일명에서 에셋/샷·태스크·버전을 역매핑 (`ASSET_FILENAME_REG`, `SHOT_FILENAME_REG`)
+  - 퍼블리시 시 ShotGrid Version 생성·등록 (`create_registration_version`)
+  - PublishedFile 생성 (`flova.shotgrid` 모듈)
+  - 일부 작업은 Deadline 플러그인으로 위임 (`dl_publish_for_asset` 등)
+- 오픈망·폐쇄망 모두 같은 ShotGrid 인스턴스 사용
+
+### 2.4 경로 규칙
+
+- 정의 위치: `flova/template/<PROJECT_CODE>.yaml`
+- 프로젝트 루트: `%DRIVE%/show/%PROJECT_CODE%`
+- 에셋: `%PROJECT_PATH%/assets/%ASSET_TYPE%/%ASSET_CODE%/%STEP_CODE%/{wip|pub}`
+- 샷: `%PROJECT_PATH%/seq/%SEQUENCE_CODE%/%SHOT_CODE%/%STEP_CODE%/{wip|pub}`
+- 파일명: `%ASSET_CODE%_%TASK_CODE%_%VERSION%`, `%SHOT_CODE%_%TASK_CODE%_%VERSION%`
+- 버전: `v` + 3자리 (`v001`)
+- 스텝 코드 실제 값: `model`, `lookdev`, `rig`, `env`, `layout`, `animation`, `matchmove`, `env_layout`, `lighting`, `comp` 등
+- 주요 캐시 경로
+  - 모델 캐시: `%ASSET_PATH%/model/pub/data/abc`
+  - 애니메이션 캐시: `%SHOT_PUB_PATH%/cache/%VERSION%`
+  - 매치무브·Env 캐시: `%SHOT_PUB_PATH%/cache/%VERSION%`
+  - 셰이더·텍스처: `%ASSET_PUB_PATH%/{shader|tex}/%VERSION%`
+
+### 2.5 USD 전환 관점의 시사점
+
+- 경로 역매핑이 폴더 인덱스 기반 (`ASSET_STEP_CODE_INDEX: 6` 등) → `%ASSET_PATH%/usd` 같은 비스텝 폴더 추가 시 역매핑 로직 영향 검토 필요
+- Nuke 14.1은 USD 미지원 → 컴프 단계에 USD를 넣으려면 Nuke 15+ 필요 (이번 범위 제외)
+- Maya 2022 기준 코드 잔존 → Python 3.10 이관과 병행 (→ [6장](#6-미결정-사항))
 
 ## 3. USD 자료조사
 
@@ -307,16 +365,16 @@ USD 단점
 * 그래서 지금처럼 버전마다 새 폴더(`v001`, `v002`...)를 만들고, 예전 폴더는 그대로 남겨두는 방식이 여전히 필요함
 * "진입점" 파일(`bus.usd`)은 그중 "최신 버전을 가리키는 표지판" 역할만 함. 필요하면 특정 버전을 고정해서 가리키게 할 수도 있음
 
-**예시 (TEST_TH / cha / bus / modeling / model / v001)**
+**예시 (TEST_TH / cha / bus / model / model / v001)**
 
 ```
 M:/show/TEST_TH/assets/cha/bus/
 ├── usd/
 │   └── bus.usd                              ← 애셋 진입점
 ├── thumbnail/
-├── modeling/pub/data/usd/v001/bus_model_v001.usd
+├── model/pub/data/usd/v001/bus_model_v001.usd
 ├── lookdev/pub/data/usd/v001/bus_lookdev_v001.usd
-└── rigging/pub/data/usd/v001/bus_rig_v001.usd
+└── rig/pub/data/usd/v001/bus_rig_v001.usd
 ```
 
 **파일 확장자**
