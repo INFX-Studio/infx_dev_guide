@@ -324,8 +324,6 @@ USD 단점
 
 ## 4. 전환 준비
 
-- (작성 예정) Asset Resolver 전략 (경로 해석, 버저닝)
-
 ### 4.0 빌드/배포 환경
 
 #### 4.0.1 USD 실행 환경 현황
@@ -394,6 +392,42 @@ USD 단점
 - USD 버전 기준: **22.11 (Maya 2024)**. 모든 DCC·도구가 쓰는 파일은 22.x 범위 스키마만 사용. Houdini 24.03 신규 기능은 Maya에서 무시되므로 사용 금지
 - 외부 Python에서 DCC를 자식 프로세스로 띄울 때: Maya USD 경로가 `PYTHONPATH`로 Houdini에 상속되지 않도록 env에서 제거
 - `katana7.0_v4.bat`의 로컬 site-packages 노출은 별도 정리 대상
+
+### 4.0.7 Asset Resolver 전략 (결정)
+
+**Asset Resolver란**
+
+- USD 파일 안에 적힌 경로 문자열을 실제 파일 경로로 바꿔주는 부품
+- 기본 제공 `ArDefaultResolver`가 절대 경로, 파일 기준 상대 경로, `PXR_AR_DEFAULT_SEARCH_PATH` 기준 검색 경로를 지원
+- 커스텀 Resolver는 DCC마다 USD 버전이 달라(22.11 / 24.03 / 23.05) 3벌 빌드·배포 필요 → 도입하지 않음
+
+**결정: 기본 Resolver + 상대 경로 + 검색 경로**
+
+- 검색 경로: `PXR_AR_DEFAULT_SEARCH_PATH=%DRIVE%/show` (예: `M:/show`)
+  - 각 DCC 런처 `.bat`과 standalone 진입점에 한 줄 추가
+- 에셋 내부 참조 (진입점 → 스텝 결과물): 파일 기준 상대 경로
+  - 예: `bus.usd` 안에서 `../model/pub/data/usd/v002/bus_model_v002.usd`
+- 샷 → 에셋 참조: 프로젝트 코드부터 시작하는 검색 경로 기준 상대 경로
+  - 예: `TEST_TH/assets/cha/bus/usd/bus.usd`
+  - 드라이브 문자에 의존하지 않음. 리눅스 렌더팜은 `PXR_AR_DEFAULT_SEARCH_PATH`만 마운트 경로로 바꾸면 동일 파일 사용
+- 절대 경로(`M:/show/...`)는 파일 안에 쓰지 않음
+
+**"최신 버전" 처리**
+
+- Resolver가 아니라 진입점 파일이 담당
+- 펍툴이 퍼블리시 시 `%ASSET_PATH%/usd/%ASSET_CODE%.usd`의 참조를 새 버전 경로로 재작성
+- 샷에서 특정 버전 고정이 필요하면 샷 레이어에서 참조 경로를 해당 버전 폴더로 직접 지정
+
+**실측 (USD 22.11)**
+
+- 상대 경로 참조 정상
+- `PXR_AR_DEFAULT_SEARCH_PATH` + `TEST_TH/assets/...` 경로 정상 해석
+- 샷 레이어에서 참조를 v001로 바꾸면 즉시 v001 반영 (버전 고정 동작 확인)
+
+**커스텀 Resolver 재검토 시점**
+
+- ShotGrid 승인 상태로 버전을 고르는 등 DB 조회가 경로 해석에 들어갈 때
+- 그 전까지는 불필요
 
 ### 4.1 애셋 퍼블리시 네이밍 규칙 및 디렉터리 구조 (초안)
 
