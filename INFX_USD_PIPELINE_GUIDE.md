@@ -1,0 +1,371 @@
+# USD 파이프라인
+
+inFX 제작 파이프라인의 USD(OpenUSD) 전환을 위한 자료조사, 준비, 계획 정리 문서
+
+- 상태: 초안 (3장 USD 자료조사 작성 완료, 그 외 섹션 진행 중)
+- 최종 수정: 2026-08-07
+
+---
+
+## 1. 목표와 범위
+
+- (작성 예정) USD 전환으로 달성하려는 목표
+- (작성 예정) 적용 대상 범위 (Asset / Shot / Layout / Lighting / Rendering 등)
+- (작성 예정) 이번 단계에서 제외하는 범위
+
+## 2. 현행 파이프라인 현황
+
+- (작성 예정) 현재 사용 중인 DCC와 버전
+- (작성 예정) 현재 데이터 교환 방식 (Alembic, FBX, MA/MB 등)
+- (작성 예정) ShotGrid 연동 구조와 퍼블리시 흐름
+- (작성 예정) 캐시/스토리지 경로 규칙
+
+## 3. USD 자료조사
+
+### 3.0 USD란
+
+* Pixar가 만듦
+* 지금은 오픈소스
+* 한마디로: 여러 사람이 같은 3D 씬을 동시에 작업하고, 하나로 합칠 수 있게 해주는 방식
+
+표준화 현황
+
+* 2023년, Pixar·Adobe·Apple·Autodesk·NVIDIA 등이 모여 **AOUSD**(Alliance for OpenUSD) 결성
+* 2025년 12월, 정식 표준 1.0판 발표
+* 2026년 현재도 계속 기능 추가 중
+* ([발표 글](https://aousd.org/news/core-spec-announcement/), [2026년 근황](https://www.linuxfoundation.org/press/aousd_prmarch2026))
+
+### 3.1 USD 특징
+
+* 기존 방식: 애니메이터가 씬 생성. 라이팅 팀이 그 씬을 이어받음. 서로 파일을 주고받고 덮어씀
+* USD 방식: 투명 필름(레이어) 여러 장을 겹쳐놓는 방식
+  * 각자 자기 필름 한 장만 그림
+  * 다 겹쳐서 보면 완성된 그림이 나옴
+  * 한 사람이 자기 필름을 고쳐도, 다른 사람 필름은 그대로 남음
+
+#### 오해하기 쉬운 부분
+
+* "각자 알아서 작업" ≠ 순서가 없어진다는 뜻
+* 모델링 → 리깅 → 애니메이션 → 라이팅 순서는 USD를 써도 그대로임
+* USD가 바꾸는 건 순서가 아니라 **기다리는 방식**
+
+기존(.abc) 방식
+
+* 애니메이션이 다 끝나야 캐시를 구워서 넘김
+* 라이팅팀은 그 파일을 받아야 시작 가능
+* 애니메이션이 조금만 바뀌어도, 다시 굽고 다시 넘겨야 함
+
+USD 방식
+
+* 라이팅팀이 애니메이션팀의 작업 중인 레이어를 실시간으로 참조 가능
+* 그래서 완성되기 전에 미리 세팅을 시작할 수 있음
+* 애니메이션이 바뀌면 자동으로 반영됨. 다시 받을 필요 없음
+
+한 줄 요약
+
+* USD는 순서를 없애는 기술이 아님
+* **기다림·재전달·재작업 비용을 줄이는 기술**
+* ([관련 설명](https://openusd.org/release/intro.html))
+
+### 3.2 핵심 개념
+
+* **Prim**
+  * 씬 안에 있는 물체 하나하나(캐릭터, 소품, 카메라, 조명 등)
+  * 폴더처럼 그 안에 또 다른 물체를 담을 수도 있음
+* **Layer**
+  * "투명 필름 한 장"에 해당
+  * 파일 하나 = 필름 한 장
+* **Stage**
+  * 필름을 전부 겹쳐서 완성한 최종 그림
+  * 실제로 화면에 보이는 결과물
+* **Composition Arc (합성 방식)**: 필름들을 겹치는 여러 가지 방법
+  * **Reference**: 다른 파일의 물체를 여기에도 가져다 놓기 (같은 나무 모델을 숲 곳곳에 복사해서 놓는 것과 비슷)
+  * **Payload**: 무거운 파일을 필요할 때만 불러오기 (평소엔 접어두고, 열어볼 때만 펼치는 것과 비슷)
+  * **Variant**: 같은 물체의 여러 버전 중 하나 고르기 (같은 캐릭터의 옷 색깔을 A/B/C 중에서 고르는 것과 비슷)
+* **필름 우선순위**
+  * 여러 필름이 같은 부분을 다르게 그리면, 어느 걸 우선할지 정해진 순서가 있음
+  * 최근 이름이 **LIVRPS → LIVERPS**로 변경 (새 규칙 하나 추가됨)
+  * 세부 순서는 실제 작업 시 참고자료 확인 필요
+  * ([관련 설명](https://docs.nvidia.com/learn-openusd/latest/creating-composition-arcs/strength-ordering/what-is-liverps.html))
+
+### 3.3 관련 기술
+
+* **UsdGeom / UsdShade / UsdSkel / UsdLux**
+  * 각각 "모양", "재질", "뼈대·애니메이션", "조명"을 표현하는 규칙 모음
+  * 도면 그릴 때 벽은 실선, 문은 점선으로 약속하는 것과 비슷
+* **MaterialX**
+  * 재질(질감, 색상, 반사 정도 등)을 표현하는 공통 언어
+  * 어떤 렌더러를 쓰든 같은 재질 정의를 재사용 가능
+* **Hydra**
+  * USD로 만든 씬을 실제 화면에 그려주는 엔진
+  * 일종의 "번역기" 역할
+  * USD 데이터를 각 렌더러(Arnold, V-Ray 등)가 이해할 수 있는 형태로 변환
+  * 덕분에 렌더러를 바꿔도 씬 데이터는 그대로 재사용 가능
+
+### 3.4 각 프로그램(DCC)의 지원 상황
+
+* **Maya**
+  * `mayaUsd`라는 무료 플러그인으로 USD를 다룸
+  * 2026년 8월 현재, **Maya 2023 이상만 공식 지원**
+  * Maya 2022는 지원 대상에서 빠져 있음
+  * ([참고](https://github.com/autodesk/maya-usd))
+  * ✅ inFX는 전 사이트 Maya 2024로 업그레이드 및 설치 완료. mayaUsd 공식 지원 범위 안으로 들어옴
+* **Houdini**
+  * "Solaris"라는 화면(LOPs)에서 USD를 기본 언어처럼 다룸
+  * 현재 USD를 가장 잘 지원하는 프로그램으로 평가받음
+* **Nuke, Unreal, Blender**
+  * 셋 다 USD 파일을 읽고 쓰는 기능을 갖추고 있음
+  * 계속 기능 추가되는 중
+* **명령어 도구**
+  * `usdview`(USD 파일 미리보기), `usdchecker`(파일 규칙 검사), `usdcat`(내용을 텍스트로 확인) 등이 기본 제공
+
+### 3.5 DCC별 USD 최소 버전 · Python 버전 요구사항
+
+* USD를 쓰려면 DCC 자체 버전뿐 아니라, 그 DCC가 내부적으로 쓰는 Python 버전도 같이 맞아야 함
+* Python 버전이 안 맞으면 USD 플러그인이 아예 설치되지 않거나, 스크립트가 깨질 수 있음
+
+| DCC | USD 사용 가능 최소 버전 | 해당 버전의 Python | 비고 |
+| --- | --- | --- | --- |
+| **Maya** | 2023 (mayaUsd 공식 지원 시작) | 2023부터 Python 3.9 전용(Python 2 지원 종료) | Maya 2022는 Python 2.7 / 3.7.7 혼용 체제라 mayaUsd 공식 지원 대상 아님. Maya 2024는 Python 3.10, 2025~2026은 Python 3.11 계열 사용 ([참고](https://github.com/Autodesk/maya-usd/blob/dev/doc/build.md), [참고](https://help.autodesk.com/cloudhelp/2023/ENU/Maya-WhatsNewPR/files/GUID-DF43840B-4DB1-43F8-BFD1-97D8D031B91D.htm)) |
+| **Houdini** | 18.0부터 USD(Solaris) 도입, 18.5~19부터 Python 3 빌드로 완전 전환 | 버전마다 다름(최근 버전은 Python 3.9~3.11 계열) | 현재 신규 배포판은 사실상 전부 Python 3 빌드. Solaris는 Houdini의 USD 작업 화면 이름 ([참고](https://www.sidefx.com/docs/houdini/solaris/usd.html)) |
+| **Nuke** | 15.0부터 기본 USD 기능 제공, 16.0부터 정식 권장 | Nuke 15~16은 내장 Python 3 사용(버전은 릴리즈별 상이) | 이전 Nuke(14 이하)는 USD 기능 없음. 실무 적용은 16.0 이상 권장 ([참고](https://learn.foundry.com/nuke-stage/current/Content/stage_environment/loading_stage/usd_export_nuke.html)) |
+| **Unreal Engine** | 4.24부터 USD 임포트 기능 도입(당시는 실험적), 4.27 이후 실무 수준으로 안정화 | 엔진 내장 Python 3(버전은 UE 릴리즈별 상이) | 5.4 이후는 Epic 자체 USD 플러그인 사용 권장(과거 NVIDIA Omniverse 커넥터 방식과 별개) ([참고](https://dev.epicgames.com/documentation/en-us/unreal-engine/universal-scene-description-usd-in-unreal-engine)) |
+| **Blender** | 2.82부터 USD 익스포트 지원 시작(당시 실험적), 4.0부터 정식 기능으로 안정화 | 4.0은 Python 3.10, 4.1 이후는 Python 3.11 | 초기 버전은 익스포트 위주였고 임포트·핫업데이트 기능은 이후 버전에서 보강됨 ([참고](https://developer.blender.org/docs/release_notes/4.0/import_export/)) |
+
+* inFX는 전 사이트 **Maya 2024로 업그레이드 및 설치 완료**. mayaUsd 공식 지원 범위(2023+) 안으로 들어옴
+* Maya 2024는 **Python 3.10** 사용 → 기존 Python 3.7.7 기준으로 작성된 코드/모듈은 3.10 호환성 재검토 필요 (→ [4장](#4-전환-준비))
+
+### 3.6 지금 쓰는 .abc(Alembic) 방식 vs USD 방식
+
+* .abc(Alembic) 방식
+  * 각 부서가 작업을 끝내면 완성된 사진을 찍어서 다음 부서에 넘기는 방식
+  * 사진은 이미 구워진 결과물
+  * 나중에 뭔가 고치려면 원본 작업 파일로 돌아가서 다시 찍어야 함
+* USD 방식
+  * 여러 사람이 같은 도면 위에서 각자 트레이싱지(반투명 종이) 한 장씩 겹쳐서 그리는 방식
+  * 레이아웃팀은 1번 종이, 애니메이션팀은 2번 종이, 라이팅팀은 3번 종이
+  * 다 겹쳐 보면 완성된 그림이 나옴
+  * 누가 자기 종이를 고쳐도 다른 사람 종이는 그대로 남음
+
+한눈에 비교
+
+| 구분 | .abc(Alembic) 방식 | USD 방식 |
+| --- | --- | --- |
+| 결과물 | 이미 다 구워진 "완성 사진" | 겹쳐서 완성하는 "여러 장의 종이" |
+| 수정할 때 | 원본에서 다시 찍어야 함(재작업) | 내 종이 한 장만 고치면 끝 |
+| 다음 부서가 작업 시작하는 시점 | 앞 부서가 "완성 사진"을 넘겨줘야만 시작 가능 | 앞 부서가 "작업 중인 종이"를 실시간으로 비쳐 보면서 미리 시작 가능 (완성 여부와 무관하게 최신 상태가 바로 보임) |
+| 앞 단계가 수정되면 | 다시 사진을 찍어서 다시 전달받아야 반영됨 | 자동으로 반영됨(다시 받을 필요 없음) |
+| 큰 장면 다룰 때 | 전체를 다 불러와야 해서 무거움 | 필요한 부분만 골라 불러올 수 있어 가벼움 |
+| 배우는 난이도 | 쉬움, 개념이 단순함 | 어려움, 새로 익힐 개념이 많음 |
+| 지원 프로그램 | 거의 모든 프로그램에서 오래전부터 지원 | 빠르게 늘고 있지만 프로그램마다 지원 수준 다름 |
+
+* ⚠️ 주의: "동시 작업 가능"은 "순서 없이 아무 때나 작업해도 된다"는 뜻이 아님. 모델링 → 리깅 → 애니메이션 → 라이팅 순서는 그대로 유지됨. 다만 "완성본을 기다렸다가 통째로 다시 받는" 대기·재작업 구간이 줄어드는 것 (자세한 설명 → [3.1절](#31-usd-특징))
+* 둘은 완전히 갈아타는 관계가 아님
+* USD 안에서도 무거운 애니메이션 데이터는 여전히 .abc 파일을 그대로 가져다 씀
+* 즉 "사진(.abc)은 그대로 쓰되, 사진들을 겹쳐서 관리하는 방식만 USD로 바꾸는" 조합이 흔함
+* ([참고](https://docs.nvidia.com/learn-openusd/latest/composition-basics/layers.html))
+
+### 3.7 장단점 분석
+
+USD 장점
+
+* 앞 단계가 "완전히 끝나기 전"에도 뒷 단계가 미리 작업을 시작할 수 있음 (작업 순서 자체는 그대로, 대기 시간만 줄어듦)
+* 여러 부서가 같은 씬의 서로 다른 레이어를 건드려도 서로 안 망가짐
+* 큰 장면도 필요한 부분만 불러와서 가볍게 작업 가능
+* 재질(질감) 정보를 렌더러 바꿔도 재사용 가능
+* 세계적으로 표준으로 자리잡는 중이라, 나중에 다른 스튜디오·업체와 호환성이 좋아짐
+
+USD 단점
+
+* 배워야 할 새 개념이 많음. 종이를 겹치는 규칙 자체가 복잡함
+* Maya는 아직 최신 버전(2023 이상)에서만 잘 지원됨
+* "기술보다 사람들 작업 습관 바꾸는 게 더 힘들다"는 얘기가 많음. 파이프라인이 클수록 전환이 오래 걸림
+* 기존 폴더 구조, ShotGrid 퍼블리시 방식도 다시 설계해야 함
+* 파일 경로를 관리해주는 도구(Asset Resolver)를 직접 만들거나 손봐야 함
+
+.abc 방식 장점
+
+* 개념이 단순해서 배우기 쉬움
+* 웬만한 프로그램·렌더러에서 다 안정적으로 지원
+* 단순한 캐시 주고받기에는 USD보다 오히려 간편함
+* 지금 쓰는 ShotGrid, 폴더 구조를 그대로 계속 쓸 수 있음
+
+.abc 방식 단점
+
+* 남의 작업 결과를 살짝 고치려 해도, 새로 다시 찍어야(재작업) 함
+* 여러 파일을 조립하는 방법이 스튜디오마다 제각각임. 다른 곳과 호환이 어려움
+* 큰 장면을 다룰 때 비효율적임. 필요 없는 부분까지 다 불러옴
+
+### 3.8 inFX 파이프라인 시사점
+
+* 한 번에 다 바꾸기보다는 이렇게 접근하는 게 현실적
+  * 애니메이션 캐시는 지금처럼 .abc를 그대로 씀
+  * 여러 부서의 씬을 조립하는 부분만 USD로 조금씩 도입함
+  * (→ [5장](#5-계획과-방법)에서 자세히 정리 예정)
+* Maya 2024 업그레이드는 완료됨 (전 사이트 설치 완료)
+  * 다음 과제는 Python 3.7.7 → 3.10 전환에 따른 기존 코드/모듈 호환성 점검 (→ [4장](#4-전환-준비))
+
+### 3.9 참고 자료
+
+- [PixarAnimationStudios/OpenUSD (공식 GitHub)](https://github.com/PixarAnimationStudios/OpenUSD) — Pixar가 관리하는 USD 소스코드 저장소
+- [OpenUSD 공식 문서](https://openusd.org/release/intro.html) — Pixar 공식 레퍼런스 사이트
+- [AOUSD 공식 사이트](https://aousd.org/) — Alliance for OpenUSD, Core Specification
+- [NVIDIA Learn OpenUSD](https://docs.nvidia.com/learn-openusd/latest/) — 합성, Hydra 등 심화 가이드
+- [Autodesk/maya-usd GitHub](https://github.com/autodesk/maya-usd) — Maya USD 플러그인 소스/릴리즈
+- [USD Survival Guide](https://lucascheller.github.io/VFX-UsdSurvivalGuide/) — 실무자 작성 비공식 가이드 (합성, Asset Resolver 등)
+- [VFX-UsdAssetResolver](https://github.com/LucaScheller/VFX-UsdAssetResolver) — Asset Resolver 레퍼런스 구현
+- [SideFX Houdini USD Basics](https://www.sidefx.com/docs/houdini/solaris/usd.html) — Houdini USD/Solaris 공식 문서
+- [Nuke USD Export 공식 문서](https://learn.foundry.com/nuke-stage/current/Content/stage_environment/loading_stage/usd_export_nuke.html) — Nuke USD 지원 버전 안내
+- [Unreal Engine USD 공식 문서](https://dev.epicgames.com/documentation/en-us/unreal-engine/universal-scene-description-usd-in-unreal-engine) — UE USD 지원 안내
+- [Blender 4.0 Import & Export 릴리즈 노트](https://developer.blender.org/docs/release_notes/4.0/import_export/) — Blender USD 지원 현황
+- [Foundry: How USD is set to change the face of VFX](https://www.foundry.com/insights/film-tv/usd-explainer-guide) — USD 도입 전략, file-by-file 접근 권장 근거
+- [Implementing USD: A Case Study in Incremental Adoption (SIGGRAPH Educators Forum)](https://dl.acm.org/doi/10.1145/3721242.3734008) — BYU 애니메이션 스튜디오 단계적 도입 사례
+- [Usd Asset Resolver Overview](https://lucascheller.github.io/VFX-UsdAssetResolver/overview.html) — Asset Resolver 단계적 구축 가이드
+
+## 4. 전환 준비
+
+- (작성 예정) 필요한 빌드/배포 환경 (USD 빌드 버전, Python 버전, 플러그인)
+- (작성 예정) Asset Resolver 전략 (경로 해석, 버저닝)
+- (작성 예정) 레이어 구조 표준안
+- (작성 예정) 기존 데이터 마이그레이션 방안
+
+### 4.1 애셋 퍼블리시 네이밍 규칙 및 디렉터리 구조 (초안)
+
+`flova.maya.app.pub_tools`의 에셋 펍툴/리깅 펍툴이 USD로 저장할 때 적용할 경로·파일이름 규칙. 기존 템플릿(`flova/template/*.yaml`) 변수 체계를 그대로 따르고, USD 전용 요소만 추가하는 방식.
+
+**기본 원칙**
+
+* 새 체계를 만들지 않고, 기존 `%ASSET_PATH%`, `%STEP_CODE%`, `%ASSET_FILENAME%` 등 템플릿 변수 규칙을 그대로 따름
+* 기존 `.abc` 캐시 규칙(`MODEL_CACHE_PUB_PATH: '%ASSET_PATH%/model/pub/data/abc'`)과 대구를 이루도록 설계
+* `%ASSET_PATH%` 바로 아래는 스텝이 아닌 폴더(`thumbnail` 등)가 이미 존재 → 같은 자리에 `usd` 폴더를 추가해도 기존 구조와 자연스럽게 맞음
+
+**1) 애셋 진입점 (여러 스텝의 USD를 최종적으로 겹쳐서 참조하는 파일)**
+
+```
+%ASSET_PATH%/usd/%ASSET_CODE%.usd
+```
+
+* `%STEP_CODE%` 서브폴더가 아닌, `%ASSET_PATH%` 바로 아래 별도 `usd` 폴더에 둠 (스텝 폴더와 혼동 방지)
+* 이 파일이 각 스텝의 퍼블리시 결과(모델/룩뎁/리깅 등)를 Reference/Sublayer로 겹쳐서 최종 애셋을 구성
+
+**2) 각 스텝의 퍼블리시 결과물**
+
+```
+%ASSET_PATH%/%STEP_CODE%/pub/data/usd/%VERSION%/%ASSET_CODE%_%TASK_CODE%_%VERSION%.usd
+```
+
+* 기존 `data/abc`와 나란히 `data/usd`를 둬서, 같은 스텝 안에서 `.abc`와 `.usd`가 구조적으로 충돌하지 않음
+* 버전을 폴더 단위(`%VERSION%`)로 관리
+
+**왜 USD도 버전(`v001`, `v002`...)이 필요한가**
+
+* USD는 "여러 레이어를 겹쳐 보여주는 방식"일 뿐, 자체적으로 이전 상태를 저장해주는 기능이 없음
+* 파일을 열어서 그냥 저장하면, 예전 내용은 사라짐. Git처럼 되돌리기가 자동으로 되지 않음
+* 오히려 USD는 다른 파일이 이 파일을 "참조"하는 구조라서, 버전 없이 파일 하나만 쓰면 더 위험함
+  * 예: 애니메이션팀이 `bus_model.usd`를 참조해서 작업 중인데, 모델링팀이 그 파일을 덮어쓰면, 애니메이션팀도 모르는 사이에 씬이 바뀜
+* 그래서 지금처럼 버전마다 새 폴더(`v001`, `v002`...)를 만들고, 예전 폴더는 그대로 남겨두는 방식이 여전히 필요함
+* "진입점" 파일(`bus.usd`)은 그중 "최신 버전을 가리키는 표지판" 역할만 함. 필요하면 특정 버전을 고정해서 가리키게 할 수도 있음
+
+**예시 (TEST_TH / cha / bus / modeling / model / v001)**
+
+```
+M:/show/TEST_TH/assets/cha/bus/
+├── usd/
+│   └── bus.usd                              ← 애셋 진입점
+├── thumbnail/
+├── modeling/pub/data/usd/v001/bus_model_v001.usd
+├── lookdev/pub/data/usd/v001/bus_lookdev_v001.usd
+└── rigging/pub/data/usd/v001/bus_rig_v001.usd
+```
+
+**파일 확장자**
+
+* 저장(배포)용: `.usdc`(바이너리, 크래시-세이프, 빠름) 권장. 파일명 표기는 관례상 `.usd`로 위장해도 무방(팀 컨벤션으로 결정 필요)
+* 디버깅/리뷰용으로 필요 시 `.usda`(텍스트, 사람이 읽을 수 있음) 추가 저장 가능
+
+**미결정 사항**
+
+* `.usd` vs `.usda` vs `.usdc` 확장자 표기 컨벤션 최종 확정 (→ [6장](#6-미결정-사항))
+* Payload 분리 기준(무거운 지오메트리를 언제 `%ASSET_CODE%_payload.usd`로 분리할지) 구체화 필요
+
+## 5. 계획과 방법
+
+### 5.1 기본 원칙
+
+* 한 번에 전면 전환하지 않음
+* "파일 단위, 필요한 곳부터" 조금씩 넓혀감
+* 기존 .abc 캐시는 당장 걷어내지 않음. USD 안에서 계속 재사용
+* 큰 파이프라인일수록 전환이 느림. 조급하게 밀어붙이지 않음
+
+이렇게 접근하는 이유
+
+* 업계 사례 다수가 "전면 전환"보다 "필요한 작업부터 file-by-file 도입"을 권장
+* 파이프라인이 클수록 "기술보다 사람들 작업 습관 전환이 더 어렵다"는 보고가 많음
+* ([참고](https://www.foundry.com/insights/film-tv/usd-explainer-guide))
+
+### 5.2 단계별 로드맵 (권장 순서)
+
+**1단계 · 기반 다지기**
+
+* USD 개념 학습, 소규모 실험(usdview로 파일 열어보기 등)
+* Asset Resolver 프로토타입 제작 (처음엔 Python으로 빠르게, 나중에 C++로 다듬는 방식 권장)
+* ✅ Maya 2024 업그레이드 및 전 사이트 설치 완료 → mayaUsd 사용 가능 상태
+* Python 3.7.7 → 3.10 전환에 따른 기존 코드/모듈 호환성 점검 (→ [4장](#4-전환-준비))
+* ([Asset Resolver 시작 가이드](https://lucascheller.github.io/VFX-UsdAssetResolver/overview.html))
+
+**2단계 · 애셋 퍼블리시부터 USD로**
+
+* 가장 먼저 손대기 쉬운 지점: 모델/애셋을 USD 형식으로 저장하고, Reference로 조립하는 부분
+* 애니메이션 캐시는 그대로 .abc 유지. USD가 그 .abc를 참조하는 방식으로 시작
+* 이 단계는 리스크가 낮음. 최종 렌더 결과물에 영향이 적음
+
+**3단계 · 레이아웃 · 씬 조립**
+
+* 여러 애셋을 모아 샷을 구성하는 부분을 USD Composition으로 전환
+* 부서 간 레이어 분리 구조(Layout / Anim / FX / Lighting)를 이 단계에서 설계
+
+**4단계 · 라이팅 · 렌더링**
+
+* 가장 마지막에 전환. 리스크가 크고, 렌더러 연동(Hydra, Render Delegate)까지 걸림
+* 실제 사례에서도 "애셋 저장 → 레이아웃 조립 → 라이팅/렌더링" 순서로 단계를 넓혀감
+* ([BYU 애니메이션 스튜디오 사례](https://dl.acm.org/doi/10.1145/3721242.3734008))
+
+**참고 사례: BYU 애니메이션 스튜디오**
+
+* 4개 작품에 걸쳐 순서대로 USD 범위를 넓힘
+* 1번째 작품(Cenote): 애셋 저장, 레이아웃 조립만 USD로
+* 2번째 작품(The Witch's Cat): 1번째 결과 위에 라이팅·렌더링까지 USD로 확장
+* 3번째 작품(Student Accomplice): 대규모 환경, 여러 부서의 겹치는 작업 일정까지 USD로 소화
+* 핵심 교훈: 작품(프로젝트) 단위로 "지난 번 범위 + 한 단계"씩 넓히는 방식이 팀 부담을 줄임
+
+### 5.3 파일럿 프로젝트 선정 기준
+
+* 일정이 급하지 않은 프로젝트
+* 부서 수·샷 수가 적어 리스크가 작은 프로젝트
+* 실패해도 다시 기존 방식(.abc)으로 되돌리기 쉬운 프로젝트
+* 가능하면 Houdini 비중이 높은 프로젝트 (USD 지원이 가장 성숙함)
+
+### 5.4 검증 방법과 성공 기준
+
+* 파일럿 종료 후 확인할 것
+  * 기존 .abc 방식 대비 작업 시간(대기·재작업 시간)이 줄었는지
+  * 렌더 결과물 품질이 기존과 동일한지
+  * 아티스트가 새 방식에 얼마나 적응했는지(설문·인터뷰)
+* 성공 기준 예시(추후 구체화 필요)
+  * (작성 예정) 정량적 기준(작업 시간, 캐시 용량 등)
+  * (작성 예정) 정성적 기준(아티스트 만족도 등)
+
+### 5.5 리스크와 대응 방안
+
+* **Maya 버전 갭**: ✅ 해소됨. Maya 2024로 전 사이트 업그레이드 및 설치 완료 (mayaUsd 공식 지원 범위 안)
+* **Python 호환성**: Maya 2024는 Python 3.10 사용. 기존 Python 3.7.7 기준 코드/모듈 재검토 필요 (진행형 과제)
+* **학습 곡선**: Composition Arc 등 새 개념 학습 부담 → 소수 TD 대상 파일럿 교육부터 시작, 이후 전체 확산
+- **Asset Resolver 미비**: 표준 구현체가 없어 자체 구축 필요 → 오픈소스 레퍼런스(VFX-UsdAssetResolver)로 프로토타입 후 다듬는 방식 권장
+- **기존 ShotGrid 퍼블리시 구조와의 충돌**: 전환 초기엔 기존 구조 유지, 필요한 부분만 USD 경로 추가하는 방식으로 병행
+
+## 6. 미결정 사항
+
+- Python 3.7.7 기준으로 작성된 기존 파이프라인 코드/모듈을 Maya 2024(Python 3.10)에서 어떻게 이관·재검증할지 (전면 재작성 vs 점진적 포팅 등 방식 미정)
+- USD 파일 확장자 표기 컨벤션: `.usd`(위장) vs `.usdc`(바이너리 그대로 표기) vs `.usda`(텍스트) 최종 확정 필요 (→ [4.1절](#41-애셋-퍼블리시-네이밍-규칙-및-디렉터리-구조-초안))
+- Payload 분리 기준(무거운 지오메트리를 언제 별도 Payload 파일로 분리할지) 구체화 필요
+- (작성 예정) 그 외 미결정 항목
