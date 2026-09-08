@@ -373,18 +373,27 @@ USD 단점
 | `katana7.0_v4.bat` | `flova;W:\inhouselova_libs;C:\Programs\Python310\Lib\site-packages` | 로컬 site-packages 노출. `fnpxr`라 usd-core 자체는 무해 |
 | 일반 Python 도구 (`*.bat` 23종) | `flova;W:\inhouselova_libs` | usd-core를 쓰려면 별도 경로 추가 필요 |
 
-#### 4.0.5 배치 원칙 (결정)
+#### 4.0.5 Maya 동봉 USD를 Maya 없이 사용 (실측)
 
-- DCC 안: 반드시 DCC 내장 USD 사용. usd-core를 DCC `PYTHONPATH`에 절대 올리지 않음
-- DCC 밖 (표준 Python, Deadline 플러그인): usd-core 사용
-- usd-core 설치 위치: DCC `PYTHONPATH`에 포함되지 않는 **전용 디렉터리**
-  - `W:\inhouselova_libs`, `flova_libs_maya2024`에 설치 금지
-  - 후보: `W:\inhouselova_libs_usd` (공유, 자리별 설치 불필요) 또는 로컬 `C:\Programs\Python310\Lib\site-packages` (pip 가이드 6.2)
-- 외부 Python에서 DCC를 자식 프로세스로 띄울 때: usd-core 경로가 `PYTHONPATH`로 상속되지 않도록 env에서 제거
-- usd-core로 쓰는 파일은 Maya 2024(22.11)가 읽을 수 있도록 22.x 범위 스키마만 사용. 신규 스키마·기능은 구버전에서 무시됨
+- 사내 표준 Python 3.10.11에서 Maya 2024 동봉 USD(22.11) 직접 사용 가능
+  - `PYTHONPATH`: `C:\Program Files\Autodesk\MayaUSD\Maya2024\0.25.0\mayausd\USD\lib\python`
+  - `os.add_dll_directory()` 3곳: `...\USD\lib`, `...\USD\bin`, `C:\Program Files\Autodesk\Maya2024\bin`
+  - Python 3.8+는 `PATH`로 DLL을 찾지 않으므로 `add_dll_directory` 필수
+- Maya 실행·라이선스 체크아웃 없음. 추가 패키지 배포 없음
+- `usdcat`·`usdchecker`·`usdview` 동봉 (`...\USD\bin\*.cmd`, 내부에서 `mayapy` 호출하므로 `PATH`에 Maya `bin` 필요)
+- 전제: 실행 머신에 Maya 2024 + mayaUsd 설치 (전 자리·Deadline 워커 해당)
+
+#### 4.0.6 배치 원칙 (결정)
+
+- 외부 USD 패키지(usd-core)는 **도입하지 않음**
+  - 이유: DCC 내장과 버전 혼재·`pxr` 충돌 위험을 원천 제거. 배포 항목 추가 없음
+  - usd-core 조사 결과(4.0.2~4.0.4)는 Maya 없는 서버에서 USD 처리가 필요해질 때의 대안으로 보존
+- DCC 안: 각 DCC 내장 USD 사용 (Maya 22.11, Houdini 24.03, Katana 23.05)
+- DCC 밖 (표준 Python 3.10.11, Deadline 플러그인): Maya 동봉 USD 재사용 (4.0.5)
+  - `flova`에 경로·DLL 디렉터리 설정 헬퍼 1개를 두고 모든 standalone 진입점이 공유
+- USD 버전 기준: **22.11 (Maya 2024)**. 모든 DCC·도구가 쓰는 파일은 22.x 범위 스키마만 사용. Houdini 24.03 신규 기능은 Maya에서 무시되므로 사용 금지
+- 외부 Python에서 DCC를 자식 프로세스로 띄울 때: Maya USD 경로가 `PYTHONPATH`로 Houdini에 상속되지 않도록 env에서 제거
 - `katana7.0_v4.bat`의 로컬 site-packages 노출은 별도 정리 대상
-- (작성 예정) 레이어 구조 표준안
-- (작성 예정) 기존 데이터 마이그레이션 방안
 
 ### 4.1 애셋 퍼블리시 네이밍 규칙 및 디렉터리 구조 (초안)
 
