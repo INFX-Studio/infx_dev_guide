@@ -118,7 +118,7 @@ inFX 제작 파이프라인의 USD(OpenUSD) 전환을 위한 자료조사, 준�
 
 - 경로 역매핑이 폴더 인덱스 기반 (`ASSET_STEP_CODE_INDEX: 6` 등) → `%ASSET_PATH%/usd` 같은 비스텝 폴더 추가 시 역매핑 로직 영향 검토 필요
 - Nuke 14.1은 USD 미지원 → 컴프 단계에 USD를 넣으려면 Nuke 15+ 필요 (이번 범위 제외)
-- Maya 2022 기준 코드 잔존 → Python 3.10 이관과 병행 (→ [6장](#6-미결정-사항))
+- Maya 2022 자리 잔존 → Maya에서 import되는 모듈은 Python 3.7.7 문법 유지 (→ [4.0.10절](#4010-python-버전-기준-결정))
 
 ## 3. USD 자료조사
 
@@ -233,7 +233,7 @@ USD 방식
 | **Blender** | 2.82부터 USD 익스포트 지원 시작(당시 실험적), 4.0부터 정식 기능으로 안정화 | 4.0은 Python 3.10, 4.1 이후는 Python 3.11 | 초기 버전은 익스포트 위주였고 임포트·핫업데이트 기능은 이후 버전에서 보강됨 ([참고](https://developer.blender.org/docs/release_notes/4.0/import_export/)) |
 
 * inFX는 전 사이트 **Maya 2024로 업그레이드 및 설치 완료**. mayaUsd 공식 지원 범위(2023+) 안으로 들어옴
-* Maya 2024는 **Python 3.10** 사용 → 기존 Python 3.7.7 기준으로 작성된 코드/모듈은 3.10 호환성 재검토 필요 (→ [4장](#4-전환-준비))
+* Maya 2024는 **Python 3.10** 사용. 단 Maya 2022 자리가 남아 있어 Maya import 모듈은 3.7.7 문법 유지 (→ [4.0.10절](#4010-python-버전-기준-결정))
 
 ### 3.6 지금 쓰는 .abc(Alembic) 방식 vs USD 방식
 
@@ -431,55 +431,129 @@ USD 단점
 
 ### 4.0.8 레이어 구조 표준안 (결정)
 
-**전제 (조사 결과)**
+설계는 USD로 대체 가능한 전 구간(1.3절)을 대상으로 함. 구현 순서와 무관하게 아래 구조를 전부 따름.
 
-- 렌더러: Arnold. 룩뎁 산출물은 Arnold 셰이더 + 쉐이딩 엔진 할당(json) + 텍스처
-- MtoA(Maya 2024)에 arnold-usd 동봉 (USD 22.11 빌드): `usd_proc.dll`(USD 직접 렌더), Hydra 딜리게이트, mayaUsd용 Arnold 머티리얼 익스포터
-- mayaUsd에 `usdAbc`(.abc 직접 참조), `usdMtlx` 동봉
+#### 4.0.8.1 전제 (실측 2026-09-10, Maya 2024 / mayaUsd 0.25.0 / MtoA 5.3.4.1)
+
+- 렌더러: Arnold. 룩뎁 산출물은 Arnold 셰이더 + 쉐이딩 엔진 할당 + 텍스처
+- `mayaUSDExport` 머티리얼 변환기: `USD Preview Surface`, `MaterialX Shading` 2종만 존재. **Arnold 전용 변환기 없음**
+- Arnold 셰이더 → MaterialX는 `arnoldExportToMaterialX`로 별도 `.mtlx` 파일 생성 가능
+- `exportRelativeTextures='relative'` 동작. 단 USD 파일과 텍스처의 드라이브가 다르면 절대 경로로 남음
+- UDIM 텍스처는 `<UDIM>` 토큰으로 기록됨
+- mayaUsd에 `usdAbc`(.abc 직접 참조), `usdMtlx` 동봉. MtoA에 arnold-usd(`usd_proc`, Hydra 딜리게이트) 동봉
 - 리그는 Maya 디포머·컨트롤러라 USD 스키마로 표현 불가
 
-**에셋 레이어 (위가 강함)**
+#### 4.0.8.2 에셋 레이어 (위가 강함)
 
 ```
-%ASSET_PATH%/usd/%ASSET_CODE%.usd            ← 진입점. /%ASSET_CODE% prim + payload
-└ %ASSET_PATH%/usd/%ASSET_CODE%_payload.usd  ← sublayer 스택만 가진 빈 레이어
-   ├ lookdev/pub/data/usd/%VERSION%/..._lookdev_....usd  (강) 머티리얼 + 바인딩 over
-   └ model/pub/data/usd/%VERSION%/..._model_....usd      (약) 지오메트리 정의
+%ASSET_PATH%/usd/%ASSET_CODE%.usd              ← 진입점. /%ASSET_CODE% prim 정의 + payload 1개. usda
+└ %ASSET_PATH%/usd/%ASSET_CODE%_payload.usd    ← sublayer 스택만 가진 빈 레이어. usda
+   ├ lookdev/pub/data/usd/%VERSION%/%ASSET_CODE%_%TASK_CODE%_%VERSION%.usd   (강) over 전용: 머티리얼 정의 + 바인딩. 지오 없음. usdc
+   │  └ lookdev/pub/data/usd/%VERSION%/%ASSET_CODE%_%TASK_CODE%_%VERSION%.mtlx  사이드카. Arnold 셰이더 원본 그래프
+   └ model/pub/data/usd/%VERSION%/%ASSET_CODE%_%TASK_CODE%_%VERSION%.usd     (약) 지오메트리 정의. usdc
 ```
 
-- 진입점은 payload 하나만 가짐. 샷에서 수백 에셋을 열 때 지오메트리를 필요할 때만 로드
-- 룩뎁 레이어는 지오메트리를 다시 쓰지 않고 `over`로 머티리얼만 얹음. 모델 버전이 올라가도 룩뎁 레이어 재사용
-- 퍼블리시 시 펍툴이 `_payload.usd`의 sublayer 경로를 새 버전으로 재작성
+- 진입점은 payload 하나만 가짐. 샷에서 수백 에셋을 참조할 때 지오메트리를 필요할 때만 로드. **1순위 구현부터 포함** (생략하지 않음)
+- 룩뎁 레이어는 **지오메트리를 포함하지 않음**. 지오 prim에 `over`로 머티리얼 바인딩만 얹음
+  - 이유: 룩뎁 레이어에 지오가 있으면 모델 v002가 나와도 더 강한 룩뎁 레이어의 v001 지오가 위에 덮여 모델 갱신이 가려짐
+  - 구현 방법: 룩뎁 씬에서 `mayaUSDExport` 후 지오 스펙을 `over`로 바꾸고 points 등 지오 속성을 제거하는 후처리
+- 퍼블리시 시 펍툴이 `_payload.usd`의 sublayer 경로를 새 버전으로 재작성. 진입점은 변하지 않음
 - 리그 스텝: USD 산출물 없음. `.mb` 유지
 
-**샷 레이어 (위가 강함)**
+#### 4.0.8.3 에셋 prim 규칙
 
 ```
-%SHOT_PATH%/usd/%SHOT_CODE%.usd              ← 샷 진입점. 부서별 sublayer 스택
- ├ lighting/pub/data/usd/%VERSION%/..._lighting_....usd   라이트, 머티리얼 override
- ├ fx/pub/data/usd/%VERSION%/..._fx_....usd               시뮬 결과 (.abc/.vdb 참조)
- ├ animation/pub/data/usd/%VERSION%/..._anim_....usd      geo를 애니 .abc로 교체(over), 카메라
- └ layout/pub/data/usd/%VERSION%/..._layout_....usd       에셋 배치: /shot/bus1 → reference TEST_TH/assets/cha/bus/usd/bus.usd
+/%ASSET_CODE%                 (defaultPrim, kind = component, Xform)
+├ geo/                        (Scope) 지오메트리. 모델 레이어가 정의
+│  └ <mesh>...                 Maya 노드 이름 그대로. 네임스페이스 제거(stripNamespaces)
+├ mtl/                        (Scope) 머티리얼. 룩뎁 레이어가 정의
+│  └ <material>...
+└ (variantSet "look")         룩 변형이 있을 때만. 기본값 = 룩뎁 태스크 코드
 ```
 
-- 부서는 자기 레이어 파일만 씀. 샷 진입점은 sublayer 목록만 갱신
-- 애니메이션 레이어: 레이아웃이 놓은 prim에 `over`로 애니 `.abc`를 참조시켜 정지 지오메트리를 캐시로 교체
-- 샷 경로·파일명 규칙은 4.1의 에셋 규칙과 동일 패턴 (`%SHOT_PATH%/usd/`, `%SHOT_CODE%_%TASK_CODE%_%VERSION%.usd`)
+- 루트 prim 이름 = 에셋 코드 (ALab의 고정 `root` 방식 대신). 샷에서 `/%SHOT_CODE%/assets/<instance>`에 reference할 때 원본 에셋을 이름으로 식별 가능
+- `assetInfo`: `name`(에셋 코드), `identifier`(진입점 경로, 검색 경로 기준 상대), `version`(모델·룩뎁 버전 문자열 `model=v002;lookdev=v003`)
+- `kind`: 단일 에셋 `component`, 에셋 묶음(세트) `assembly`, 하위 그룹 `group`
+- 머티리얼 출력: `outputs:surface`(UsdPreviewSurface, 뷰포트·Hydra Storm) + `outputs:mtlx:surface`(MaterialX, Arnold·Karma 렌더) 병기
+- Arnold 렌더 경로: `usd_proc`이 `mtlx` 컨텍스트를 읽음. 실패 시 `.mtlx` 사이드카를 Arnold `materialx` 노드로 직접 지정 (6.1 검증 항목)
 
-**결정 사항**
+#### 4.0.8.4 텍스처 경로 규칙
+
+- 텍스처 파일 위치: `%TEXTURE_PUB_VERSION_PATH%` (기존 규칙 유지)
+- USD·`.mtlx` 안 경로: **USD 파일 기준 상대 경로** (예: `../../../../lookdev/pub/tex/v002/bus_diffuse.<UDIM>.tif`)
+- UDIM: `<UDIM>` 토큰 그대로 기록
+- 드라이브가 달라 절대 경로로 남은 경우: 퍼블리시 실패로 처리 (텍스처와 USD는 같은 프로젝트 드라이브에 있어야 함)
+- 라이브러리 임포트·프로젝트 간 이동 시: 상대 경로를 목적지 기준으로 재작성하는 잡 실행 (구현됨: `dl_maya_retarget_usd_for_import`)
+
+#### 4.0.8.5 샷 레이어 (위가 강함)
+
+```
+%SHOT_PATH%/usd/%SHOT_CODE%.usd                 ← 샷 진입점. /%SHOT_CODE% prim + 부서별 sublayer. usda
+ ├ lighting/pub/data/usd/%VERSION%/%SHOT_CODE%_%TASK_CODE%_%VERSION%.usd    라이트, 렌더 설정, 머티리얼 override
+ ├ fx/pub/data/usd/%VERSION%/...                                              시뮬 결과 (.abc/.vdb 참조)
+ ├ animation/pub/data/usd/%VERSION%/...                                       geo를 애니 .abc로 교체(over), 카메라
+ ├ layout/pub/data/usd/%VERSION%/...                                          에셋 배치: reference + xform
+ └ (matchmove) cam/%VERSION%/...                                              카메라 .abc를 참조하는 얇은 USD
+```
+
+- 각 부서 레이어는 `%SHOT_PATH%/%STEP_CODE%/pub/data/usd/%VERSION%/` (에셋과 동일 패턴)
+- 샷 진입점의 sublayer 목록은 부서 퍼블리시 시 해당 부서 항목만 새 버전으로 재작성
+- 샷 진입점에는 payload를 두지 않음. 에셋 진입점의 payload가 이미 지연 로드를 담당
+
+#### 4.0.8.6 샷 prim 규칙
+
+```
+/%SHOT_CODE%                          (defaultPrim, kind = assembly)
+├ assets/                             (Scope)
+│  └ <instance>                       (Xform, kind = component) reference → TEST_TH/assets/<type>/<code>/usd/<code>.usd
+│     ├ geo/  ...                     애니 레이어가 over로 .abc 참조를 얹음
+│     └ mtl/  ...
+├ cam/                                (Scope)
+│  └ <cam name>                       (Camera) 매치무브·레이아웃 카메라
+├ lights/                             (Scope) 라이팅 레이어가 정의
+├ fx/                                 (Scope) FX 레이어가 정의
+└ render/                             (Scope) 렌더 설정(UsdRender), 라이팅 레이어가 정의
+```
+
+- `<instance>` 이름 = Maya 리퍼런스 네임스페이스와 동일 (예: `bus1`, `bus2`). 애니 `.abc` 캐시 이름과 일치해야 애니 레이어가 `over` 대상을 찾음
+- 애니 레이어의 `.abc` 참조: `/%SHOT_CODE%/assets/<instance>/geo`에 `over` + reference(`<cache>.abc`, `/<abc root prim>`). 타입 없는 prim에 참조 (4.0.9 실측 함정 참고)
+- 애니 캐시 `.abc`는 기존 `ANIMATION_CACHE_PUB_VERSION_PATH` 그대로. USD 애니 레이어는 그 캐시를 가리키는 얇은 파일
+
+#### 4.0.8.7 애니메이션 지오메트리 이행
+
+- 1단계(현재): `.abc` 캐시 유지, USD가 참조. 기존 `.abc` 소비 도구와 병행
+- 2단계: 애니 펍툴이 `mayaUSDExport`로 시간 샘플 USD를 직접 export. `.abc`와 USD 이중 산출
+- 3단계: `.abc` 소비 도구가 모두 USD로 전환되면 `.abc` 생성 중단
+- 단계 전환 조건: 라이팅(Houdini)·컴프(Nuke 15+)가 USD 애니 레이어를 직접 소비할 수 있을 때
+
+#### 4.0.8.8 변형(Variant) 규칙
+
+- 에셋 룩 변형: `/%ASSET_CODE%`에 variantSet `look`. 각 variant는 다른 룩뎁 레이어를 sublayer 대신 reference로 연결
+- 에셋 모델 변형(LOD, 파손 상태 등): variantSet `model`
+- 샷에서 variant 선택은 레이아웃 레이어가 `variants` 메타데이터로 기록
+- 변형이 없는 에셋은 variantSet을 만들지 않음
+
+#### 4.0.8.9 결정 요약
 
 | 항목 | 결정 |
 | --- | --- |
-| 에셋 합성 | payload + sublayer 스택 (model < lookdev) |
-| 샷 합성 | 샷 진입점 하나에 부서별 sublayer |
-| 룩뎁 머티리얼 | Arnold 노드 그대로 (MtoA 익스포터, 렌더 결과 동일) + 뷰포트용 UsdPreviewSurface 병기 |
+| 에셋 합성 | 진입점 → payload → `_payload.usd` sublayer 스택 (model < lookdev). 1순위부터 포함 |
+| 룩뎁 레이어 | `over` 전용. 지오 미포함 |
+| 룩뎁 머티리얼 | UsdPreviewSurface + MaterialX 병기 + `.mtlx` 사이드카. Arnold 전용 변환기는 존재하지 않아 사용 불가 |
+| 텍스처 경로 | USD 기준 상대 경로, `<UDIM>` 토큰. 드라이브 불일치는 실패 처리 |
 | 리그 스텝 | USD 산출물 없음 |
-| 애니 지오메트리 | `.abc` 캐시를 USD가 참조. USD 타임샘플 직접 export는 추후 이행 검토 |
+| 샷 합성 | 샷 진입점 하나에 부서별 sublayer. payload 없음 |
+| 애니 지오메트리 | `.abc` 참조로 시작, 3단계 이행 |
+| 에셋 루트 prim | `/%ASSET_CODE%`, kind component, `geo`/`mtl` Scope |
+| 샷 루트 prim | `/%SHOT_CODE%`, kind assembly, `assets`/`cam`/`lights`/`fx`/`render` Scope |
+| 인스턴스 이름 | Maya 네임스페이스와 동일 |
+| Variant | `look`, `model` variantSet. 없으면 생성 안 함 |
 
-**쉬운 설명**
+#### 4.0.8.10 쉬운 설명
 
-- 에셋 = 겉봉투(`bus.usd`) 안에 속봉투(`bus_payload.usd`), 속봉투 안에 모델 종이와 색칠 종이(룩뎁). 색칠 종이는 모델 위에 덧대는 트레이싱지라 모델이 바뀌어도 다시 안 그림
-- 샷 = 레이아웃 → 애니 → FX → 라이팅 순으로 트레이싱지를 쌓음. 위 종이가 아래를 덮음
+- 에셋 = 겉봉투(진입점) 안에 속봉투(payload), 속봉투 안에 모델 종이와 색칠 종이(룩뎁). 색칠 종이는 밑그림 없이 색만 있는 트레이싱지라 모델이 바뀌어도 다시 안 그림
+- 색은 두 가지 언어(간단한 미리보기용, 렌더용 MaterialX)로 같이 적어둠. Arnold 전용 언어로는 못 적어서 원본 그래프(.mtlx)를 옆에 붙임
+- 샷 = 레이아웃 → 애니 → FX → 라이팅 순으로 트레이싱지를 쌓음. 각 트레이싱지는 "bus1", "bus2"처럼 Maya에서 부르던 이름으로 에셋을 찾음
 - 리그는 Maya 안에서만 존재하는 조종 장치. 조종한 결과(애니 캐시)만 USD에 들어감
 
 ### 4.0.9 기존 데이터 마이그레이션 방안 (결정)
@@ -642,6 +716,51 @@ M:/show/TEST_TH/assets/cha/bus/
   * Pixar 프로덕션: `.usd` 확장자에 바이너리 내용
   * ALab(공개 예제): 전부 `.usda`. 학습용이라 성능 기준 아님
 
+### 4.2 템플릿 키 (flova/template/*.yaml)
+
+| 키 | 값 | 상태 |
+| --- | --- | --- |
+| `ASSET_USD_ENTRY_PATH` | `%ASSET_PATH%/usd` | 구현됨 |
+| `MODEL_USD_PUB_VERSION_PATH` | `%ASSET_PATH%/model/pub/data/usd/%VERSION%` | 구현됨 |
+| `LOOKDEV_USD_PUB_VERSION_PATH` | `%ASSET_PATH%/lookdev/pub/data/usd/%VERSION%` | 구현됨 |
+| `SHOT_USD_ENTRY_PATH` | `%SHOT_PATH%/usd` | 예정 |
+| `LAYOUT_USD_PUB_VERSION_PATH` | `%SHOT_PATH%/layout/pub/data/usd/%VERSION%` | 예정 |
+| `ANIMATION_USD_PUB_VERSION_PATH` | `%SHOT_PATH%/animation/pub/data/usd/%VERSION%` | 예정 |
+| `CAM_USD_VERSION_PATH` | `%SHOT_PATH%/cam/%VERSION%` (기존 `CAM_VERSION_PATH`와 동일 폴더) | 예정 |
+| `FX_USD_PUB_VERSION_PATH` | `%SHOT_PATH%/fx/pub/data/usd/%VERSION%` | 예정 |
+| `LIGHTING_USD_PUB_VERSION_PATH` | `%SHOT_PATH%/lighting/pub/data/usd/%VERSION%` | 예정 |
+| `USD_SEARCH_PATH` | `%DRIVE%/show` (`PXR_AR_DEFAULT_SEARCH_PATH`에 주입) | 예정 |
+
+- 파일명은 기존 `ASSET_FILENAME`·`SHOT_FILENAME` + `.usd` (별도 키 없음)
+- 역매핑: `%ASSET_PATH%/usd`, `%SHOT_PATH%/usd`는 스텝 폴더가 아니므로 `ASSET_STEP_CODE_INDEX`·`SHOT_STEP_CODE_INDEX` 역매핑에서 `usd`를 스텝으로 오인하지 않도록 제외 목록 추가 (6.1 검증 항목)
+
+### 4.3 소비 측 설계 (각 DCC에서 USD를 읽는 방법)
+
+| 구간 | DCC | 소비 방식 |
+| --- | --- | --- |
+| 레이아웃 | Maya 2024 | 에셋 진입점을 mayaUsd proxy shape로 배치. 인스턴스 이름 = proxy 노드 이름 = Maya 네임스페이스 규칙. 레이아웃 펍툴이 proxy 배치를 레이아웃 레이어(reference + xform)로 export |
+| 애니메이션 | Maya 2022/2024 | 리그 `.mb` 리퍼런스 유지 (USD 소비 없음). 애니 펍툴이 `.abc` 캐시 + 그 캐시를 참조하는 USD 애니 레이어 export |
+| FX | Houdini 20.5 | 샷 진입점을 Solaris LOP로 로드. 시뮬 결과를 FX 레이어로 export |
+| 라이팅 | Houdini 20.5 Solaris | 샷 진입점 로드, 라이트·렌더 설정 레이어 export. 렌더는 HtoA(Arnold)로 MaterialX 컨텍스트 사용 |
+| 라이팅 (Maya 유지 시) | Maya 2024 | 샷 진입점을 proxy shape로 로드, Arnold `usd_proc`으로 렌더 |
+| 컴프 | Nuke 14.1 | USD 미소비. 카메라·지오는 기존 `.abc`·`.fbx` 그대로 (Nuke 15+ 전환 시 재검토) |
+| 라이브러리 | standalone | Maya 동봉 USD(4.0.5)로 진입점 검사·텍스처 경로 재작성 |
+
+- 애니메이션 구간은 리그 특성상 USD 소비가 없음. USD 도입 효과는 레이아웃→라이팅 구간에 집중됨
+- 라이팅 DCC를 Houdini로 통일할지 Maya 병행할지는 파이프라인 운영 결정 (6장 참고)
+
+### 4.4 구현 정합 점검 (2026-09-10 기준)
+
+| 항목 | 구현 상태 | 조치 |
+| --- | --- | --- |
+| 진입점 payload | 진입점이 직접 sublayer. `_payload.usd` 없음 | 진입점 = prim + payload, `_payload.usd` = sublayer 스택으로 수정 |
+| 룩뎁 레이어 지오 포함 | 룩뎁 USD에 지오 + 머티리얼 | 지오 스펙을 `over`로 바꾸고 지오 속성 제거하는 후처리 추가 |
+| 머티리얼 컨텍스트 | UsdPreviewSurface + MaterialX + `.mtlx` | 설계와 일치 |
+| 텍스처 상대 경로 | `exportRelativeTextures='relative'` + 임포트 재작성 잡 | 설계와 일치. 드라이브 불일치 실패 처리 추가 |
+| 에셋 prim 규칙 | `stripNamespaces`, `mergeTransformAndShape`. `geo`/`mtl` Scope·kind·assetInfo 미적용 | 4.0.8.3 규칙으로 후처리 추가 |
+| Maya 버전 분기 | USD 잡을 Maya 2024 mayapy로 분리 | 설계와 일치 |
+| ShotGrid | Version `USD Path` (`sg_usd_path`) 기록 | 설계와 일치. PublishedFile Type `USD` 추가 여부 결정 필요 |
+
 ## 5. 계획과 방법
 
 ### 5.1 기본 원칙
@@ -734,7 +853,7 @@ M:/show/TEST_TH/assets/cha/bus/
 ### 5.5 리스크와 대응 방안
 
 * **Maya 버전 갭**: ✅ 해소됨. Maya 2024로 전 사이트 업그레이드 및 설치 완료 (mayaUsd 공식 지원 범위 안)
-* **Python 호환성**: Maya 2024는 Python 3.10 사용. 기존 Python 3.7.7 기준 코드/모듈 재검토 필요 (진행형 과제)
+* **Python 호환성**: Maya 2022(3.7.7)·2024(3.10) 병존. USD 코드는 지연 import + Maya 버전 분기 (→ [4.0.10절](#4010-python-버전-기준-결정))
 * **학습 곡선**: Composition Arc 등 새 개념 학습 부담 → 소수 TD 대상 파일럿 교육부터 시작, 이후 전체 확산
 - **Asset Resolver 미비**: 표준 구현체가 없어 자체 구축 필요 → 오픈소스 레퍼런스(VFX-UsdAssetResolver)로 프로토타입 후 다듬는 방식 권장
 - **기존 ShotGrid 퍼블리시 구조와의 충돌**: 전환 초기엔 기존 구조 유지, 필요한 부분만 USD 경로 추가하는 방식으로 병행
@@ -750,6 +869,8 @@ M:/show/TEST_TH/assets/cha/bus/
 | ~~Arnold의 usdAbc 렌더~~ | ✅ 검증 완료 (2026-09-10). 아래 4.0.9 실측 참고 | - |
 | Houdini 20.5 실측 | Python·USD 버전, `PYTHONPATH`가 자체 라이브러리보다 앞에 오는지 (4.0.1·4.0.3은 문서 기준) | gmdirect에서 `hython -c "import sys; from pxr import Usd; print(sys.version, Usd.GetVersion(), sys.path[:5])"` |
 | Arnold 머티리얼 USD export | MtoA 익스포터로 내보낸 UsdShade Arnold 머티리얼이 Houdini(HtoA)·Katana(KtoA)에서 동일하게 렌더되는지 (4.0.8 룩뎁 결정 전제) | 파일럿 첫 에셋으로 3개 DCC 렌더 비교 |
+| Arnold `usd_proc`의 MaterialX 컨텍스트 렌더 | `outputs:mtlx:surface`로 기록된 머티리얼을 `usd_proc`이 그대로 렌더하는지. 불가 시 `.mtlx` 사이드카 직접 지정 경로 확정 (4.0.8.3) | `kick`으로 룩뎁 USD 렌더 테스트 |
+| 룩뎁 `over` 전용 후처리 | 룩뎁 USD에서 지오 속성을 제거해도 바인딩이 유지되는지 | 후처리 후 진입점 열어 머티리얼 확인 |
 | 경로 역매핑 영향 | `%ASSET_PATH%/usd` 비스텝 폴더 추가 시 폴더 인덱스 기반 역매핑(`ASSET_STEP_CODE_INDEX`)에 영향 없는지 (2.5절) | 역매핑 테스트 추가 |
 
 ### 6.2 Maya 2022 종료 시 후속
