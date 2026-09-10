@@ -769,11 +769,12 @@ M:/show/TEST_TH/assets/cha/bus/
 | --- | --- | --- |
 | `upAxis` | `Y` | Maya·Arnold 기준. Houdini도 Y-up |
 | `metersPerUnit` | `0.01` (cm) | Maya 작업 단위 cm. Houdini(m)에서 읽을 때 자동 스케일 근거 |
-| `timeCodesPerSecond` / `framesPerSecond` | 프로젝트 fps (템플릿 `FPS` 키 신설) | 애니·카메라 시간 샘플 해석 기준 |
+| `timeCodesPerSecond` / `framesPerSecond` | Maya 시간 단위에서 `mayaUSDExport`가 자동 기록. 검증 시 ShotGrid Project `FPS`(`sg_fps`)와 대조 | 애니·카메라 시간 샘플 해석 기준. 템플릿 키 불필요 |
 | `startTimeCode` / `endTimeCode` | 샷 레이어에만 기록. 샷 프레임 범위 | 에셋 레이어는 시간 범위 없음 |
 | `defaultPrim` | 에셋 `/%ASSET_CODE%`, 샷 `/%SHOT_CODE%` | prim 경로 없이 reference 가능 |
 | `customLayerData` | `flova` 딕셔너리: `project`, `entity`, `step`, `task`, `version`, `sg_version_id`, `published_by`, `published_at` | 파일만 보고 출처 추적 |
 
+- 시간 샘플이 있는 레이어(애니·카메라·FX)만 fps 메타데이터 필요. 에셋·진입점 레이어는 없음
 - 모든 레이어에 위 메타데이터를 펍툴이 기록. 없는 파일은 `usdchecker` 단계에서 실패 처리
 
 #### 4.5.2 prim 이름 제약
