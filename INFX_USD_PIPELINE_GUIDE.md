@@ -516,6 +516,43 @@ USD 단점
 - 대상 프로젝트 범위: 진행 중 프로젝트 전체 vs 지정 프로젝트
 - 트리거 위치: 에셋 로더에서 "USD 없음" 감지 시 자동 Deadline 제출 vs 펍툴 수동 버튼
 
+### 4.0.10 Python 버전 기준 (결정)
+
+**현황 (2026-09-10 실측)**
+
+| 환경 | Python |
+| --- | --- |
+| Maya 2022 (일부 자리 잔존) | 3.7.7 |
+| Maya 2024 | 3.10.8 |
+| Houdini 20.5 | 3.11.7 |
+| 사내 표준 Python·테스트 | 3.10.11 |
+
+- Maya에서 import되는 모듈(`flova/maya`, `flova/ui`, `flova/shotgrid`, `flova/cache`, `flova/config.py` 등)은 3.7.7 문법 준수 중. 3.9+ 문법 검색 결과는 전부 docstring
+- 예외 1건: `flova/date.py:155`의 `-> list[str]` 반환 힌트. Maya 2022에서 import 시 TypeError. 별도 수정 대상
+- standalone 전용 모듈(`flova/app/face_aging`, `flova/nuke`, `flova/deadline/plugins` 등)은 3.9+ 문법 사용 중. Maya 2022에서 import되지 않으므로 무방
+
+**결정**
+
+- Maya 2022를 완전히 벗어나기 전까지 **Maya에서 import될 수 있는 모듈은 Python 3.7.7 호환 문법 유지** (`CLAUDE.md` 규칙 그대로)
+- USD 관련 신규 코드도 같은 규칙 적용
+  - `from typing import List, Dict, Optional` 사용. `list[str]`, `X | None`, walrus 금지
+  - `pxr` import는 함수 안에서 지연 import. Maya 2022에는 mayaUsd가 없으므로 모듈 import 시점에 `pxr`를 건드리면 펍툴 전체가 안 열림
+  - 펍툴은 Maya 버전을 확인해 2023 미만이면 USD 저장 단계를 건너뛰고 기존 `.abc`·`.mb` 퍼블리시만 수행
+- standalone 전용 모듈은 3.10 문법 허용 (현행 유지)
+- `ruff.toml`에 `target-version = "py37"` 지정은 하지 않음. standalone 모듈의 3.10 문법이 전부 경고로 잡혀 노이즈가 됨. Maya 모듈 호환성은 코드 리뷰와 Maya 2022 스모크 테스트로 확인
+
+**쉬운 설명**
+
+- 아직 옛날 Maya(2022)를 쓰는 자리가 있어서, Maya 안에서 돌아가는 코드는 옛날 문법으로 써야 함
+- USD 기능은 새 Maya(2024)에서만 켜지고, 옛날 Maya에서는 조용히 건너뜀. 옛날 Maya에서 펍툴이 아예 안 열리는 사고를 막기 위함
+- Maya 밖에서만 도는 코드는 새 문법 써도 됨
+
+**Maya 2022 완전 종료 시 후속 작업**
+
+- `CLAUDE.md` Python 기준을 3.10으로 상향
+- `maya2022*.bat` 런처 7개, 코드 참조 5곳(`config.py`, `asset_library*.py`, `flova_exec_launcher/descriptions.py`, `dl_cleanup_maya_scene_distribute.py`) 제거
+- 펍툴의 Maya 버전 분기 제거
+
 ### 4.1 애셋 퍼블리시 네이밍 규칙 및 디렉터리 구조 (초안)
 
 `flova.maya.app.pub_tools`의 에셋 펍툴/리깅 펍툴이 USD로 저장할 때 적용할 경로·파일이름 규칙. 기존 템플릿(`flova/template/*.yaml`) 변수 체계를 그대로 따르고, USD 전용 요소만 추가하는 방식.
@@ -696,7 +733,6 @@ M:/show/TEST_TH/assets/cha/bus/
 
 ## 6. 미결정 사항
 
-- Python 3.7.7 기준으로 작성된 기존 파이프라인 코드/모듈을 Maya 2024(Python 3.10)에서 어떻게 이관·재검증할지 (전면 재작성 vs 점진적 포팅 등 방식 미정)
 - 마이그레이션 대상 프로젝트 범위: 진행 중 프로젝트 전체 vs 지정 프로젝트 (→ [4.0.9절](#409-기존-데이터-마이그레이션-방안-결정))
 - 마이그레이션 트리거 위치: 에셋 로더 자동 제출 vs 펍툴 수동 버튼 (→ [4.0.9절](#409-기존-데이터-마이그레이션-방안-결정))
 - (작성 예정) 그 외 미결정 항목
