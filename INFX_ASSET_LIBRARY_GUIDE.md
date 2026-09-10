@@ -136,6 +136,8 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | `shader` | `{acode}_shader_{ver}.mb`, `.ass`(생성된 경우만), `_data.json`, `_meta.json` | 에셋 펍 |
 | `texture` | 씬에서 사용된 모든 텍스쳐 원본 (UDIM 전체 타일 포함, `file`·`aiImage` 노드 대상) | 에셋 펍 |
 | `lookdev` | 룩뎁 펍 씬 원본 `{acode}_{tcode}_{ver}.mb` (임포트 시 원본 우선 리패스용) | 에셋 펍 |
+| `usd_model` | 모델 USD `{acode}_model_{ver}.usd` (지오만) | 에셋 펍 USD 잡 |
+| `usd_lookdev` | 룩뎁 USD `{acode}_{tcode}_{ver}.usd` (지오+머티리얼, 렌더 컨텍스트 다중 출력) + MaterialX `{acode}_{tcode}_{ver}.mtlx` | 에셋 펍 USD 잡 |
 | `manifest_rig` | `{acode}_rig_manifest.json` | 리깅 펍 |
 | `rig` | 리깅 펍 `.mb` (텍스쳐는 아카이브하지 않음 — 룩뎁 텍스쳐 덮어쓰기 방지) | 리깅 펍 |
 
@@ -235,6 +237,35 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 - 공용 로직은 `flova/shotgrid/total_library.py`(가칭) `TotalLibraryRegistrar`로 모아
   펍툴·수동 툴·향후 다른 라이브러리 페이지(Material, Nuke Node 등)에서 재사용합니다.
 
+### 3.7 USD 산출물 (에셋 펍 USD 잡)
+
+DCC별 임포트(Houdini/Katana/Unreal)에서 쉐이딩 네트워크까지 재현하기 위해 에셋 펍에
+USD 산출물을 추가합니다. MaterialX 단독 방식은 Maya 2022 MtoA 호환성이 없어 USD를 기본으로 하고,
+머티리얼은 렌더 컨텍스트별로 병기합니다. (`UsdPreviewSurface` 범용 / `MaterialX` / `Arnold`)
+
+| 산출물 | 파일 | 템플릿 키 (USD 가이드 4.1 명명 규칙) |
+| --- | --- | --- |
+| 모델 USD | `{acode}_model_{ver}.usd` (지오만) | `MODEL_USD_PUB_VERSION_PATH` = `%ASSET_PATH%/model/pub/data/usd/%VERSION%` |
+| 룩뎁 USD | `{acode}_{tcode}_{ver}.usd` (지오+머티리얼·바인딩, 텍스쳐는 USD 기준 상대경로) | `LOOKDEV_USD_PUB_VERSION_PATH` = `%ASSET_PATH%/lookdev/pub/data/usd/%VERSION%` |
+| MaterialX | `{acode}_{tcode}_{ver}.mtlx` (Arnold 쉐이더 → MaterialX) | 룩뎁 USD와 같은 폴더 |
+| 진입점 USD | `{acode}.usd` (룩뎁 → 모델 순 sublayer, ASCII 내용) | `ASSET_USD_ENTRY_PATH` = `%ASSET_PATH%/usd` |
+
+- 실행: `AssetPubToolsWindow._submit_asset_usd_export()`가 펍 잡 완료에 의존하는 별도 잡
+  `dl_maya_export_usd_for_asset`(**Maya 2024 mayapy**, `maya_version='2024'`)을 제출합니다.
+  mayaUsd export는 Maya 2023 이후 공식 지원이며, 기존 2022 펍 잡의 회귀를 피하기 위해 잡을 분리합니다.
+- 잡 체인: 펍 잡 → USD 잡 → (Version 확정) → **아카이빙 잡은 확정 잡과 USD 잡 모두에 의존**합니다.
+  USD 잡이 실패하면 아카이빙은 대기 상태로 남습니다. (USD는 라이브러리 필수 산출물)
+  프로젝트 퍼블리시(Version 확정·노트·완료 메시지)는 USD 잡과 무관하게 진행됩니다.
+- USD 잡은 산출물을 만든 뒤 `total_library.append_manifest_files()`로 manifest에
+  `usd_model`/`usd_lookdev` 역할을 보탭니다. (같은 역할은 교체되어 재실행에 안전)
+- 요청한 머티리얼 변환기가 mayaUsd에 없으면(`mayaUSDListShadingModes`) 조용히 빼지 않고 잡을 실패시킵니다.
+- 진입점 USD는 sublayer만 갖는 얇은 레이어라 pxr 없이 텍스트로 씁니다.
+  (`.usd` 확장자에 ASCII 내용. USD는 헤더로 형식을 판별)
+- 리깅 펍은 USD를 만들지 않습니다. (스킨/컨트롤 USD 표준 미정)
+- ⚠️ 실측 필요 (gmdirect): 팜 Maya 2024 mayapy 실행(Deadline Python 3.1 executable),
+  `convertMaterialsTo` 변환기 이름(`UsdPreviewSurface`/`MaterialX`/`Arnold`), `exportRelativeTextures` 옵션,
+  `arnoldExportToMaterialX` 인자, mayapy 2024에서 `pxr` import 가능 여부, Houdini HtoA 유무, Katana 7 USD 로드.
+
 ---
 
 ## 4. 라이브러리에서 가져오기 (임포트)
@@ -275,10 +306,16 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
      (`shader_assign_components`의 페이스 컴포넌트 우선) → 텍스쳐 경로/colorspace/
      uvTilingMode 연결(`aiImage`는 filename 속성) → 메쉬 Arnold 속성 적용 →
      `{에셋}_{태스크}_v###.mb` 저장
-3. ShotGrid 등록(선택 시): Asset/Task는 find-or-create, Version은 신규 생성
+3. USD 배치(대상 프로젝트 템플릿에 USD 키가 있을 때만): `usd_model`/`usd_lookdev` 파일을
+   USD 버전 폴더에 대상 이름으로 배치하고, 진입점 USD `%ASSET_PATH%/usd/{에셋코드}.usd`를 텍스트로 생성.
+   USD 키가 없는 프로젝트는 USD 산출물을 건너뜁니다.
+4. ShotGrid 등록(선택 시): 구성요소(model/lookdev/rig)별 Task/Version 등록. Asset/Task는 find-or-create.
    (`sg_path_to_package`=마야 씬, `sg_scan_source_path`=`TOTAL_LIBRARY:{라이브러리 코드}`,
-   description에 출처 기록)
-4. 완료 시 Mattermost 알림
+   description에 출처 기록, 룩뎁 Version의 `USD Path`(`sg_usd_path`)=진입점 USD 경로)
+5. 후속 잡 `dl_maya_retarget_usd_for_import`(**Maya 2024 mayapy**): 룩뎁 USD 안의 Shader Asset 입력과
+   MaterialX 텍스트의 텍스쳐 경로를 대상 텍스쳐 폴더 기준 상대경로로 재작성 (파일이름·UDIM 토큰 유지,
+   manifest 텍스쳐 파일이름과 일치하는 경로만 변경). 라이브러리에 USD가 없으면 잡이 스스로 종료합니다.
+6. 완료 시 Mattermost 알림 (마지막 잡 완료 기준)
 
 - 공용 로직은 `flova/shotgrid/total_library.py`의 `fetch_library_item`,
   `TotalLibraryImportPlanner`(다운로드 계획/다음 버전/등록)에 있습니다.
@@ -302,6 +339,15 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
    덮어쓰기 시 Attachment 전량 교체 → rig 등록 시 asset 산출물 보존 확인, 테스트 데이터 정리
    완료) → Oracle 검증 ✅ (goal OK / 품질 PASS / 보안 PASS / 아키텍처 blocking 1건 → 리깅
    썸네일 네트워크 복사로 수정 후 재검증 PASS). 남은 절차: 배포(W:/inhouse) 및 폐쇄망 동기화.
+6. **N — 데이터 보강 / 임포트 구성요소별 등록** ✅ (2026-08-28~09-03 완료): 4장 참고.
+7. **U1 — USD 기반** ✅ (2026-09-10 완료): `usd_model`/`usd_lookdev` 역할, `append_manifest_files`,
+   `build_usd_entry_layer_text`, USD 템플릿 키 3종(14개 프로젝트), 임포트 USD 경로·`sg_usd_path` 기록,
+   ShotGrid `USD Path` 필드 생성.
+8. **U2/U3 — USD export 잡·펍툴 체인** ✅ (2026-09-10 완료): `dl_maya_export_usd_for_asset`,
+   `_submit_asset_usd_export()`, 아카이빙 잡 의존 `[finalize, usd]`.
+9. **U4 — 임포트 USD** ✅ (2026-09-10 완료): 진입점 USD 생성, `dl_maya_retarget_usd_for_import`, UI 잡 체인.
+10. **U0/U5 — 실측·e2e** ⏳: 3.7의 실측 항목(gmdirect) 확인 → Maya 펍 → Houdini/Katana 로드 확인 →
+    가이드 반영.
 
 ---
 
@@ -336,6 +382,11 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | 2 | `.tx` 업로드 여부 | 제외 (재생성 가능한 파생물. file 노드가 원본 확장자를 참조하므로 manifest에서 자연 제외됨) | 2026-08-26 |
 | 3 | 신규 필드 `Source Project`(`sg_source_project`), `Source Version`(`sg_source_version`) | 생성 (M5 배포 전 ShotGrid에서 필드 먼저 생성) | 2026-08-26 |
 | 4 | 아카이빙 동작 방식 | 항상 자동 실행 (UI 체크박스 없음) | 2026-08-26 |
+| 5 | 리깅 텍스쳐 | 아카이브 제외 (룩뎁 텍스쳐 덮어쓰기 방지) | 2026-08-28 |
+| 6 | USD 잡 구성 | 펍 잡과 분리한 별도 Maya 2024 mayapy 잡 | 2026-09-10 |
+| 7 | USD 잡 실패 시 | 아카이빙 잡 대기 (USD는 라이브러리 필수 산출물) | 2026-09-10 |
+| 8 | 진입점 USD 경로 기록 | 신규 필드 `USD Path`(`sg_usd_path`, Version, text) — 생성 완료 | 2026-09-10 |
+| 9 | USD 확장자 | `.usd` (진입점은 ASCII 내용) | 2026-09-10 |
 
 ---
 
@@ -348,3 +399,5 @@ ShotGrid `TOTAL_LIBRARY` 프로젝트 기반 에셋 라이브러리의 구조와
 | 2026-08-26 | M2~M5 완료. Oracle 검증 통과(리깅 썸네일 blocking 수정 포함). 알려진 한계·리깅 썸네일 복사 규칙·파일 사전검증 규칙 추가 |
 | 2026-08-27 | `.ass`는 생성된 경우에만 manifest에 포함하도록 수정. 임포트 기능 추가(4장): AMI 임포트 툴, 렌더팜 임포트 플러그인, AMI(id 727) 등록 |
 | 2026-08-28 | 데이터 보강: 룩뎁 원본 아카이브(`lookdev` 역할)·임포트 원본 우선 리패스, 원본 썸네일 승계·설명 병기, 페이스 단위 어싸인 기록, `aiImage` 텍스쳐 지원(프로젝트 펍 포함), 씬 단위·FPS·OCIO·파일 크기 기록. 리깅 텍스쳐는 아카이브 제외로 확정 |
+| 2026-09-03 | 임포트: 구성요소(model/lookdev/rig)별 Task·Version 등록(스텝 기준 Task 조회), 공통 버전 산출 |
+| 2026-09-10 | USD 방식 export 추가(3.7): 별도 Maya 2024 잡, `usd_model`/`usd_lookdev` 역할, USD 템플릿 키, 임포트 진입점 USD·텍스쳐 경로 재작성 잡, `USD Path` 필드. 설계 결정 5~9 확정 |
