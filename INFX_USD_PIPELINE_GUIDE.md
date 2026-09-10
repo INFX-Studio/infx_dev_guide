@@ -472,6 +472,8 @@ USD 단점
 ```
 
 - 루트 prim 이름 = 에셋 코드 (ALab의 고정 `root` 방식 대신). 샷에서 `/%SHOT_CODE%/assets/<instance>`에 reference할 때 원본 에셋을 이름으로 식별 가능
+- `geo`는 mayaUSDExport의 컨테이너 그룹(Xform)을 옮긴 것이라 타입이 `Xform`. `mtl`은 `materialsScopeName='mtl'`로 나온 `Scope`
+- 구현 메모 (실측 2026-09-10): `mayaUSDExport` 0.25.0에 `rootPrim` 옵션 없음 → export 후 Sdf 네임스페이스 편집으로 재구성. `Sdf.BatchNamespaceEdit`는 prim 경로만 옮기고 `material:binding` 대상 경로는 고치지 않으므로 대상·연결 경로를 별도로 다시 씀 (`flova.usd.asset_layers.restructure_asset_layer`)
 - `assetInfo`: `name`(에셋 코드), `identifier`(진입점 경로, 검색 경로 기준 상대), `version`(모델·룩뎁 버전 문자열 `model=v002;lookdev=v003`)
 - `kind`: 단일 에셋 `component`, 에셋 묶음(세트) `assembly`, 하위 그룹 `group`
 - 머티리얼 출력: `outputs:surface`(UsdPreviewSurface, 뷰포트·Hydra Storm) + `outputs:mtlx:surface`(MaterialX, Arnold·Karma 렌더) 병기
@@ -753,11 +755,11 @@ M:/show/TEST_TH/assets/cha/bus/
 
 | 항목 | 구현 상태 | 조치 |
 | --- | --- | --- |
-| 진입점 payload | 진입점이 직접 sublayer. `_payload.usd` 없음 | 진입점 = prim + payload, `_payload.usd` = sublayer 스택으로 수정 |
-| 룩뎁 레이어 지오 포함 | 룩뎁 USD에 지오 + 머티리얼 | 지오 스펙을 `over`로 바꾸고 지오 속성 제거하는 후처리 추가 |
+| 진입점 payload | ✅ 조치 완료 (`flova.usd.asset_layers`, flova `25e0648`) | 진입점 = `/{asset}` prim + payload, `_payload.usd` = sublayer 스택. 임포트 잡도 동일 |
+| 룩뎁 레이어 지오 포함 | ✅ 조치 완료 | export 후 `strip_geometry_to_overrides`: `/{asset}`·`/{asset}/geo` 아래를 `over`로 바꾸고 `material:binding`만 남김. GeomSubset은 def 유지 |
 | 머티리얼 컨텍스트 | UsdPreviewSurface + MaterialX + `.mtlx` | 설계와 일치 |
 | 텍스처 상대 경로 | `exportRelativeTextures='relative'` + 임포트 재작성 잡 | 설계와 일치. 드라이브 불일치 실패 처리 추가 |
-| 에셋 prim 규칙 | `stripNamespaces`, `mergeTransformAndShape`. `geo`/`mtl` Scope·kind·assetInfo 미적용 | 4.0.8.3 규칙으로 후처리 추가 |
+| 에셋 prim 규칙 | ✅ 조치 완료 | export 후 `restructure_asset_layer`: `/{컨테이너}` → `/{asset}/geo`, `/{컨테이너}/mtl` → `/{asset}/mtl`, `/{asset}` kind=component·defaultPrim. assetInfo는 진입점에 기록 |
 | Maya 버전 분기 | USD 잡을 Maya 2024 mayapy로 분리 | 설계와 일치 |
 | ShotGrid | Version `USD Path` (`sg_usd_path`) 기록 | 설계와 일치. PublishedFile Type `USD` 신설 (4.6) |
 
