@@ -2,8 +2,8 @@
 
 inFX 제작 파이프라인의 USD(OpenUSD) 전환을 위한 자료조사, 준비, 계획 정리 문서
 
-- 상태: 초안 (3장 USD 자료조사 작성 완료, 그 외 섹션 진행 중)
-- 최종 수정: 2026-09-08
+- 상태: 설계 결정 완료 (1~5장). 6장 검증 필요 항목 확인 후 구현 착수
+- 최종 수정: 2026-09-10
 
 ---
 
@@ -556,7 +556,7 @@ USD 단점
 - `maya2022*.bat` 런처 7개, 코드 참조 5곳(`config.py`, `asset_library*.py`, `flova_exec_launcher/descriptions.py`, `dl_cleanup_maya_scene_distribute.py`) 제거
 - 펍툴의 Maya 버전 분기 제거
 
-### 4.1 애셋 퍼블리시 네이밍 규칙 및 디렉터리 구조 (초안)
+### 4.1 애셋 퍼블리시 네이밍 규칙 및 디렉터리 구조 (결정)
 
 `flova.maya.app.pub_tools`의 에셋 펍툴/리깅 펍툴이 USD로 저장할 때 적용할 경로·파일이름 규칙. 기존 템플릿(`flova/template/*.yaml`) 변수 체계를 그대로 따르고, USD 전용 요소만 추가하는 방식.
 
@@ -736,4 +736,17 @@ M:/show/TEST_TH/assets/cha/bus/
 
 ## 6. 미결정 사항
 
-- (작성 예정) 그 외 미결정 항목
+- 설계 결정 항목은 모두 확정됨 (2026-09-10)
+
+### 6.1 구현 전 검증 필요
+
+| 항목 | 내용 | 확인 방법 |
+| --- | --- | --- |
+| Arnold의 usdAbc 렌더 | `usdAbc`로 `.abc`를 참조한 USD를 Arnold `usd_proc`이 렌더할 수 있는지 (4.0.9 마이그레이션 전제) | `kick`으로 참조 USD 렌더 테스트 |
+| Houdini 20.5 실측 | Python·USD 버전, `PYTHONPATH`가 자체 라이브러리보다 앞에 오는지 (4.0.1·4.0.3은 문서 기준) | gmdirect에서 `hython -c "import sys; from pxr import Usd; print(sys.version, Usd.GetVersion(), sys.path[:5])"` |
+| Arnold 머티리얼 USD export | MtoA 익스포터로 내보낸 UsdShade Arnold 머티리얼이 Houdini(HtoA)·Katana(KtoA)에서 동일하게 렌더되는지 (4.0.8 룩뎁 결정 전제) | 파일럿 첫 에셋으로 3개 DCC 렌더 비교 |
+| 경로 역매핑 영향 | `%ASSET_PATH%/usd` 비스텝 폴더 추가 시 폴더 인덱스 기반 역매핑(`ASSET_STEP_CODE_INDEX`)에 영향 없는지 (2.5절) | 역매핑 테스트 추가 |
+
+### 6.2 Maya 2022 종료 시 후속
+
+- 4.0.10 "Maya 2022 완전 종료 시 후속 작업" 참고
