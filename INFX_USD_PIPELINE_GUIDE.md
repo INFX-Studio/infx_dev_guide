@@ -507,9 +507,14 @@ USD 단점
 - 색칠 정보(룩뎁)만 Maya를 한 번 돌려 꺼냄
 - 쓰지 않는 에셋·끝난 프로젝트는 손대지 않음
 
-**검증 필요**
+**실측 (2026-09-10, Arnold 7.2.4.1 `kick` + `usd_proc`, USD 22.11)**
 
-- `usdAbc`로 참조한 지오메트리를 Arnold `usd_proc`이 렌더할 수 있는지 (arnold-usd의 usdAbc 로드 여부). 불가 시 모델은 `.abc` → USD 실제 변환으로 대체
+- `.abc`(Maya AbcExport 큐브)를 참조하는 USD를 `usd` 프로시저럴로 렌더 → polymesh 1개·12 triangle 정상 렌더
+- 결론: 모델 마이그레이션은 `.abc` 실제 변환 없이 참조 USD만 생성하면 됨
+- 참조 작성 규칙 (실측으로 확인된 함정)
+  - Alembic 루트 prim은 Mesh 자체이므로, 타입이 지정된 prim(`Xform`)에 직접 참조하면 타입 충돌로 지오메트리가 사라짐 → 타입 없는 자식 prim(`/bus/geo`)에 참조
+  - Alembic 레이어의 defaultPrim이 있어도 prim 경로를 명시(`AddReference(path, '/bus_geo')`)
+  - Alembic 데이터는 시간 샘플이라 `Get()`은 None. 반드시 시간(`Get(frame)`) 지정. Arnold `usd` 노드도 `frame` 지정
 
 **대상 범위와 트리거 (결정)**
 
@@ -742,7 +747,7 @@ M:/show/TEST_TH/assets/cha/bus/
 
 | 항목 | 내용 | 확인 방법 |
 | --- | --- | --- |
-| Arnold의 usdAbc 렌더 | `usdAbc`로 `.abc`를 참조한 USD를 Arnold `usd_proc`이 렌더할 수 있는지 (4.0.9 마이그레이션 전제) | `kick`으로 참조 USD 렌더 테스트 |
+| ~~Arnold의 usdAbc 렌더~~ | ✅ 검증 완료 (2026-09-10). 아래 4.0.9 실측 참고 | - |
 | Houdini 20.5 실측 | Python·USD 버전, `PYTHONPATH`가 자체 라이브러리보다 앞에 오는지 (4.0.1·4.0.3은 문서 기준) | gmdirect에서 `hython -c "import sys; from pxr import Usd; print(sys.version, Usd.GetVersion(), sys.path[:5])"` |
 | Arnold 머티리얼 USD export | MtoA 익스포터로 내보낸 UsdShade Arnold 머티리얼이 Houdini(HtoA)·Katana(KtoA)에서 동일하게 렌더되는지 (4.0.8 룩뎁 결정 전제) | 파일럿 첫 에셋으로 3개 DCC 렌더 비교 |
 | 경로 역매핑 영향 | `%ASSET_PATH%/usd` 비스텝 폴더 추가 시 폴더 인덱스 기반 역매핑(`ASSET_STEP_CODE_INDEX`)에 영향 없는지 (2.5절) | 역매핑 테스트 추가 |
