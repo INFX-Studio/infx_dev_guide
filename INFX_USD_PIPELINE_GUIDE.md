@@ -2,7 +2,7 @@
 
 inFX 제작 파이프라인의 USD(OpenUSD) 전환을 위한 자료조사, 준비, 계획 정리 문서
 
-- 상태: 설계 결정 완료 (1~5장). 6장 검증 필요 항목 확인 후 구현 착수
+- 상태: 설계 확정 (1~5장, 2026-09-10 승인). 6.1 검증 항목은 구현 중 확인
 - 최종 수정: 2026-09-10
 
 ---
@@ -747,7 +747,7 @@ M:/show/TEST_TH/assets/cha/bus/
 | 라이브러리 | standalone | Maya 동봉 USD(4.0.5)로 진입점 검사·텍스처 경로 재작성 |
 
 - 애니메이션 구간은 리그 특성상 USD 소비가 없음. USD 도입 효과는 레이아웃→라이팅 구간에 집중됨
-- 라이팅 DCC를 Houdini로 통일할지 Maya 병행할지는 파이프라인 운영 결정 (6장 참고)
+- 라이팅 DCC: Houdini Solaris 단일로 확정 (2026-09-10). Maya proxy shape + `usd_proc` 경로는 검증·비상용으로만 유지
 
 ### 4.4 구현 정합 점검 (2026-09-10 기준)
 
@@ -759,7 +759,73 @@ M:/show/TEST_TH/assets/cha/bus/
 | 텍스처 상대 경로 | `exportRelativeTextures='relative'` + 임포트 재작성 잡 | 설계와 일치. 드라이브 불일치 실패 처리 추가 |
 | 에셋 prim 규칙 | `stripNamespaces`, `mergeTransformAndShape`. `geo`/`mtl` Scope·kind·assetInfo 미적용 | 4.0.8.3 규칙으로 후처리 추가 |
 | Maya 버전 분기 | USD 잡을 Maya 2024 mayapy로 분리 | 설계와 일치 |
-| ShotGrid | Version `USD Path` (`sg_usd_path`) 기록 | 설계와 일치. PublishedFile Type `USD` 추가 여부 결정 필요 |
+| ShotGrid | Version `USD Path` (`sg_usd_path`) 기록 | 설계와 일치. PublishedFile Type `USD` 신설 (4.6) |
+
+### 4.5 공통 규약 (모든 USD 파일에 적용)
+
+#### 4.5.1 스테이지 메타데이터
+
+| 항목 | 값 | 이유 |
+| --- | --- | --- |
+| `upAxis` | `Y` | Maya·Arnold 기준. Houdini도 Y-up |
+| `metersPerUnit` | `0.01` (cm) | Maya 작업 단위 cm. Houdini(m)에서 읽을 때 자동 스케일 근거 |
+| `timeCodesPerSecond` / `framesPerSecond` | 프로젝트 fps (템플릿 `FPS` 키 신설) | 애니·카메라 시간 샘플 해석 기준 |
+| `startTimeCode` / `endTimeCode` | 샷 레이어에만 기록. 샷 프레임 범위 | 에셋 레이어는 시간 범위 없음 |
+| `defaultPrim` | 에셋 `/%ASSET_CODE%`, 샷 `/%SHOT_CODE%` | prim 경로 없이 reference 가능 |
+| `customLayerData` | `flova` 딕셔너리: `project`, `entity`, `step`, `task`, `version`, `sg_version_id`, `published_by`, `published_at` | 파일만 보고 출처 추적 |
+
+- 모든 레이어에 위 메타데이터를 펍툴이 기록. 없는 파일은 `usdchecker` 단계에서 실패 처리
+
+#### 4.5.2 prim 이름 제약
+
+- USD prim 이름 허용 문자: `[A-Za-z_][A-Za-z0-9_]*`. 숫자 시작·하이픈·공백·한글 불가
+- 에셋 코드·샷 코드·인스턴스 이름이 규칙에 어긋나면 변환: 허용되지 않는 문자는 `_`, 숫자 시작은 앞에 `_`
+- 변환된 이름과 원본의 대응은 `assetInfo:name`(원본)으로 보존
+- 신규 에셋·샷 코드는 ShotGrid 생성 단계에서 prim 규칙을 만족하도록 검증 (`sg_ami` 검증 규칙 추가)
+
+#### 4.5.3 쓰기 원자성과 동시 퍼블리시
+
+- 진입점·`_payload.usd`·샷 진입점처럼 **재작성되는 파일**은 임시 파일에 쓴 뒤 `os.replace`로 교체. 읽는 쪽이 절반 쓰인 파일을 열지 않도록 함
+- 스텝 레이어(버전 폴더 안)는 한 번 쓰면 수정하지 않음 (immutable)
+- 같은 에셋의 모델·룩뎁 퍼블리시가 동시에 `_payload.usd`를 재작성하는 경우: 재작성 직전에 파일을 다시 읽어 자기 스텝 항목만 바꾸고 저장 (read-modify-write). Deadline 잡이 순차 실행되므로 실제 충돌 빈도는 낮음
+
+#### 4.5.4 롤백
+
+- 잘못된 버전 퍼블리시: `_payload.usd`(또는 샷 진입점)의 해당 스텝 항목을 이전 버전 폴더로 되돌리는 펍툴 기능 제공. 버전 폴더는 immutable이라 파일 복원 불필요
+- ShotGrid Version 상태 변경과 연동: 해당 Version을 `rev`/`omt`로 바꾸면 진입점도 직전 승인 버전으로 재작성
+
+#### 4.5.5 검증 (usdchecker)
+
+- 퍼블리시 잡 마지막 단계에서 `usdchecker`(Maya 동봉) 실행. 실패 시 잡 실패
+- 추가 자체 검사: 4.5.1 메타데이터 존재, defaultPrim 일치, 텍스처 경로 상대성(4.0.8.4), 참조 대상 파일 존재
+
+#### 4.5.6 쉬운 설명
+
+- 모든 USD 파일 첫머리에 "위쪽은 Y, 단위는 cm, 초당 24프레임, 누가 언제 만들었는지"를 적어둠. 어느 프로그램이 열어도 같은 크기·같은 속도로 보이게 하는 명찰
+- USD는 이름에 하이픈·숫자 시작을 못 씀. 어긋나면 `_`로 바꾸되 원래 이름은 따로 기록
+- "표지판" 파일은 다 쓴 뒤 한 번에 바꿔치기해서, 남이 읽는 도중 반쯤 쓰인 파일을 보는 일이 없게 함
+- 잘못 올렸으면 표지판만 이전 버전으로 돌리면 됨. 이전 버전 파일은 그대로 남아 있음
+
+### 4.6 ShotGrid 연동
+
+| 항목 | 내용 |
+| --- | --- |
+| PublishedFile Type | `USD` 신설 (표시 이름 `USD`). 스텝 레이어 파일(버전 폴더 안)마다 PublishedFile 1건 |
+| PublishedFile 대상 | 모델 USD, 룩뎁 USD, `.mtlx`(Type `MaterialX` 신설), 샷 부서 레이어 USD. 진입점·`_payload.usd`는 버전이 없으므로 등록하지 않음 |
+| Version 필드 | `USD Path` (`sg_usd_path`): 해당 Version의 스텝 레이어 USD 경로 (구현됨) |
+| Asset 필드 | `USD Entry` (`sg_usd_entry`): 에셋 진입점 경로 (검색 경로 기준 상대). 라이브러리·로더가 참조 |
+| Shot 필드 | `USD Entry` (`sg_usd_entry`): 샷 진입점 경로 |
+| 스키마 변경 순서 | 필드·Type 생성 → 코드 배포 (없는 field code 전송 시 실패). 오픈망에서 생성하면 폐쇄망에 즉시 반영 |
+
+### 4.7 배포 순서 (폐쇄망)
+
+1. ShotGrid 필드·PublishedFile Type 생성 (4.6)
+2. 템플릿 키 추가 (4.2), 14개 프로젝트 yaml 동시 반영
+3. DCC 런처 `.bat`에 `PXR_AR_DEFAULT_SEARCH_PATH` 추가 (4.0.7)
+4. Deadline 워커에 Maya 2024 `mayapy` 실행 등록 (Python Version 3.1 슬롯). 미등록 시 USD 잡 실패
+5. `flova` 배포 (`W:/inhouse/flova`) — standalone USD 헬퍼(4.0.5), 펍툴 USD 잡 체인, 리타겟 잡
+6. 파일럿 프로젝트에서 에셋 1개 퍼블리시 → 6.1 검증 항목 확인
+7. 펍툴 "USD 변환" 버튼 배포 (4.0.9)
 
 ## 5. 계획과 방법
 
@@ -860,7 +926,7 @@ M:/show/TEST_TH/assets/cha/bus/
 
 ## 6. 미결정 사항
 
-- 설계 결정 항목은 모두 확정됨 (2026-09-10)
+- 설계 결정 항목은 모두 확정됨 (2026-09-10). 권장값 8건(루트 prim `/%ASSET_CODE%`, 인스턴스 = Maya 네임스페이스, 라이팅 Houdini 단일, payload 즉시 추가, 룩뎁 지오 제거, PublishedFile Type `USD`, 텍스처 드라이브 불일치 실패, Variant 조건부) 승인
 
 ### 6.1 구현 전 검증 필요
 
