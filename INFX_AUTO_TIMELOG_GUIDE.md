@@ -407,9 +407,9 @@ Shot 스텝
 | hair | `hair` | CFX 헤어 | 확정 |
 | crowd | `crowd` | CFX 군중 | 확정 |
 | env | `env` | ENV | 확정 |
-| retime | `comp` | 합성 | 확인 |
-| env_layout | `env` | ENV | 확인 (`layout`도 가능) |
-| lookdev | `tex` | 텍스쳐 | 확인 (전용 키 없음) |
+| retime | `comp` | 합성 | 확정 (2026-09-11) |
+| env_layout | `env` | ENV | 확정 (2026-09-11) |
+| lookdev | `lookdev` | 룩뎁 | 확정 (2026-09-11). Main Job `tex`/텍스쳐를 `lookdev`/룩뎁으로 변경 |
 | cfx | — | Default Main Job | 확인 (hair·cloth·crowd 상위 스텝) |
 | asset | — | Default Main Job | 확인 (`asset_layout` 후보) |
 | edit | — | Default Main Job | 확인 (`prod_manager` 또는 `etc` 후보) |
@@ -435,7 +435,7 @@ Asset 스텝
 | cloth | `cloth` | CFX 클로스 | 확인 (`asset_cloth` 키 없음) |
 | crowd | `crowd` | CFX 군중 | 확인 |
 | matte | `matte` | 매트페인팅 | 확인 |
-| lookdev | `tex` | 텍스쳐 | 확인 |
+| lookdev | `lookdev` | 룩뎁 | 확정 (2026-09-11) |
 | art | `concept` | 컨셉 | 확인 |
 | HDRI | — | Default Main Job | 확인 |
 
@@ -654,6 +654,7 @@ Asset 스텝
 | 2026-09-08 | 문체를 개조식·명사형 종결로 통일 |
 | 2026-09-08 | 완전 자동화로 목표 변경. 자동 확정 조건, 이의 제기 기간 14일, 사용자 안내 문안 추가 |
 | 2026-09-08 | §10.1 검토 진행 지침 추가 |
+| 2026-09-11 | §5.2 확정: retime→comp, env_layout→env, lookdev→lookdev(신규 Main Job, 기존 텍스쳐 항목을 룩뎁으로 변경) |
 | 2026-09-11 | 조사 반영: 경로 파서 `WorkFile` 확정(§5.1), 스텝→Main Job 표 작성(§5.2), DCC 훅 삽입 지점·전송 방식(§3.3). 런처 컨텍스트 개념 삭제 |
 | 2026-09-11 | §2.1 흐름도·§2.3 판별 규칙을 D-5·D-11 결정과 일치하도록 정리. `non_dcc` 컨텍스트 명시 |
 | 2026-09-10 | D-9 결정: 미분류 입력 기한 경과 시 입력 불가, `expired` 잠금. P-11 대응 방침 확정 |
