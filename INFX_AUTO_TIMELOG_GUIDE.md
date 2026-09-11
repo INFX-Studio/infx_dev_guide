@@ -89,7 +89,6 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | 포어그라운드 창 | OS API (Windows `GetForegroundWindow`) → 프로세스 이름, 창 제목 | 활성 컨텍스트 판별 |
 | 마지막 입력 후 경과 시간 | OS API (`GetLastInputInfo`), 기존 `idle-presence-monitor` 재사용 | idle 판별 |
 | 현재 DCC 문서 | DCC 플러그인이 push한 현재 파일 경로 (PID별) | Project + Main Job 매핑 1순위 근거 |
-| 런처 컨텍스트 | 프로세스 실행 시 전달된 env var 또는 세션 파일 (`INFX_PROJECT`, `INFX_STEP` 등) | 파일 경로 부재 시 2순위 근거 |
 | 프로세스 CPU 사용률 | 감시 대상 프로세스의 CPU 점유율 | 머신 시간 판별 |
 | 세션 잠금/절전 | 기존 `idle-presence` power event | 강제 idle 처리 |
 
@@ -103,10 +102,11 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 1. **세션 잠금·절전·로그오프** → `idle`
 2. **마지막 입력 후 경과 시간 ≥ idle 임계값(기본 10분, D-6)** → `idle`. 단, 포어그라운드가 감시 대상 DCC이고 해당 프로세스 CPU 사용률이 임계값 이상이면 `대기` 컨텍스트(직전 활성 컨텍스트에 귀속). 렌더 대기, 파일 로딩, 플레이백 확인 시간의 idle 오분류 방지
 3. **포어그라운드가 감시 대상 DCC, 파서가 파일 경로 인식** → Project + Main Job (`work`)
-4. **포어그라운드가 감시 대상 DCC, 파서 인식 실패, 런처 컨텍스트 존재** → 런처 컨텍스트로 귀속 (`work`)
-5. **포어그라운드가 감시 대상 DCC, 파서 인식 실패, 런처 컨텍스트 없음** → `미분류`. 사용자 입력 대상 ([§2.6](#26-dcc-밖-시간과-미분류-시간-처리-d-7d-11-결정))
-6. **포어그라운드가 비DCC 앱** (브라우저, 메신저, 탐색기, 오피스 등) → `non_dcc`. 초안 생성 시 직전 활성 DCC 컨텍스트로 상속
-7. 그 외 → `non_dcc`
+4. **포어그라운드가 감시 대상 DCC, 파서 인식 실패** → `미분류`. 사용자 입력 대상 ([§2.6](#26-dcc-밖-시간과-미분류-시간-처리-d-7d-11-결정))
+5. **포어그라운드가 비DCC 앱** (브라우저, 메신저, 탐색기, 오피스 등) → `non_dcc`. 초안 생성 시 직전 활성 DCC 컨텍스트로 상속
+6. 그 외 → `non_dcc`
+
+- 런처 컨텍스트(env var)는 사용하지 않음. 조사 결과 Flova 런처 bat는 `FLOVA_ROOT`, `PYTHONPATH`, `NUKE_PATH`, `HOUDINI_PATH`, `OCIO`만 설정하며 프로젝트·샷·스텝 env var 규약이 없음. 컨텍스트는 항상 씬 경로에서 파생
 
 ### 2.4 다중 DCC 처리
 
@@ -228,7 +228,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | 에이전트 | `desktop/src/main/auto-timelog/` (Electron main) | 샘플링, 세그먼트 생성, 로컬 저장, 업로드 |
 | 프로브 사이드카 | `flova/timelog/auto_timelog/agent_probe.py` (Python 3.7 문법) | 포어그라운드 창·프로세스·CPU 조회, JSON 스트림 출력 |
 | DCC 플러그인 | Flova 파이프라인 DCC 설정 (Maya, Nuke, Houdini 등) | 현재 문서 경로를 에이전트로 push |
-| 매핑 규칙 엔진 | `flova/timelog/auto_timelog/` (Python 3.7 문법) | 기존 Flova 경로 파서 결과·런처 컨텍스트 → Project + Main Job 변환 |
+| 매핑 규칙 엔진 | `flova/timelog/auto_timelog/` (Python 3.7 문법) | `WorkFile` 파서 결과 → Project + Main Job 변환 |
 | 서버 API | `backend/timelog/api_views_auto_timelog.py` | 세그먼트 수신, 초안 생성, 초안 조회 |
 | 웹 UI | `frontend/src/components/timelog/AutoTimelog*.vue` | 자동분 잠금 표시, 근거 표시, 미분류 입력 |
 | 관리자 화면 | `frontend/src/views/admin/` | 매핑 규칙 관리, 미분류 비율 통계, 정책 설정 |
@@ -248,22 +248,27 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 트레이 메뉴에 수집 일시 중지 제공. 중지 구간은 `수집 중지`로 기록, 초안에서 상속 처리
 - 앱 업데이트 후 최초 실행 시 §12 안내 문안을 표시하고 "확인" 클릭 시각을 서버에 기록 (D-4). 거부 선택지 없음. 확인 전에는 수집을 시작하지 않음
 
-### 3.3 DCC 플러그인
+### 3.3 DCC 플러그인 (조사 반영 2026-09-11)
 
-- 각 DCC의 문서 열기/저장/전환 이벤트에서 현재 파일 경로와 PID를 에이전트로 push
+- 각 DCC의 문서 열기/저장/신규 이벤트에서 현재 파일 경로와 PID를 에이전트로 push
+- 훅 공통 모듈: `flova/timelog/auto_timelog/dcc_hook.py` (Python 3.7 문법). DCC별 startup에서는 이 모듈의 등록 함수 1줄만 호출
+- 전송: 기존 AMI 실행 named pipe와 같은 방식의 전용 pipe `\\.\pipe\infx-works-auto-timelog`. 연결 timeout 0.2초, 실패 시 무시 (DCC 시작·저장을 절대 막지 않음). 참고 구현 `flova/app/ami_exec/dispatch.py`, `flova/temp/infx_protocol_sender.py`
+- 페이로드: `{"pid", "dcc", "doc_path", "event"}`. 컨텍스트 해석은 DCC 안에서 하지 않고 에이전트·서버가 수행
 
-| DCC | 이벤트 | 비고 |
-|-----|--------|------|
-| Maya | `scriptJob` `SceneOpened`, `SceneSaved`, `NewSceneOpened` | |
-| Nuke | `addOnScriptLoad`, `addOnScriptSave`, `addOnCreate` | 다중 스크립트 창은 활성 스크립트 기준 |
-| Houdini | `hou.hipFile` event callback | |
-| 기타 | 창 제목 파싱 fallback | 제목에 파일 경로가 포함되는 DCC 한정 |
+| DCC | 부트스트랩 위치 | 훅 삽입 지점 | 이벤트 | 현황 |
+|-----|-----------------|--------------|--------|------|
+| Maya | `flova/maya/startup/userSetup.py` (`PYTHONPATH` 경유, `flova/exec/maya20xx.bat`) | line 77 이후 `cmds.evalDeferred` 블록 추가. `cmds.about(batch=True)` 게이트 유지 | `scriptJob` `SceneOpened`, `SceneSaved`, `NewSceneOpened` | 동일 패턴 기존 사용 (`flova/maya/app/pub_tools.py:2201`) |
+| Nuke | `flova/nuke/menu.py` (`NUKE_PATH` 경유, `flova/app/flova_task/utils.py:53`) | `_setup_callbacks()` (line 253~262)에 추가 | `addOnScriptLoad`, `addOnScriptSave`, `addOnScriptClose` | `addOnScriptLoad`만 기존 사용. Save·Close 신규 |
+| Houdini | `HOUDINI_PATH=flova/houdini/menus` (`flova/exec/houdini20.5.bat:8`) | `flova/houdini/menus/scripts/456.py` 신규 생성 (현재 `flova/houdini/scripts/123.py`는 HOUDINI_PATH 밖이라 로드되지 않음) | `hou.hipFile.addEventCallback` | 기존 콜백 없음. 부트스트랩부터 신규 |
+| Katana | `flova/katana` (`KATANA_RESOURCES`) | `UIPlugins/katana_pulldown_menu.py` onStartup 콜백 옆 | Katana scene callbacks | Phase 2 범위 밖, 추후 |
+| Hiero | `flova/hiero/Python/Startup/init.py` | 동일 | Nuke API 동일 | Phase 2 범위 밖, 추후 |
+| 3ds Max, Blender, After Effects, Photoshop, Substance, Mari | Flova 통합 없음 | 창 제목 파싱 fallback | 제목에 파일 경로가 있는 앱만 | 파일럿 미분류 통계로 우선순위 결정 |
 
-- 플러그인 없는 DCC는 창 제목 파싱으로 대체. 경로 추출 실패 시 런처 컨텍스트로만 판별
+- DCC Python 버전: Maya 2022 = 3.7.7 (제약 기준), Maya 2024 = 3.10, Nuke 14/15 = 3.9/3.10, Houdini 20.5 = 3.11, Katana 7 = 3.10. 훅 모듈은 3.7 문법 준수
 
 ### 3.4 매핑 규칙 엔진
 
-- 판별 근거 우선순위: **DCC 현재 문서 경로 → 런처 컨텍스트 → 창 제목**
+- 판별 근거 우선순위: **DCC 플러그인이 push한 문서 경로 → 창 제목 파싱**
 - 파일 경로에서 **프로젝트 루트 폴더**(Project `code`)와 **스텝 폴더명**만 추출. 샷·에셋·시퀀스 구분은 귀속에 불필요 (TimeLog는 Task 미기록)
 - 프로젝트 목록·`code`는 Redis cache(`SGProjectCache`) 사용. cache miss 시 ShotGrid 직접 조회 fallback 금지. 매핑 실패는 `미분류`
 - 스텝 → Main Job 변환은 `flova.timelog.model.MainJob` 기준 매핑 테이블을 규칙 엔진에 배치
@@ -356,40 +361,92 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 
 ## 5. 매핑 규칙
 
-### 5.1 경로 규칙 (P-3·P-4 반영)
+### 5.1 경로 규칙 (P-3·P-4 반영, 조사 반영 2026-09-11)
 
-- 경로 해석은 **기존 Flova 파이프라인 경로 파서**를 그대로 사용. 파서는 경로 + 파일명으로 프로젝트, 시퀀스, 샷, 에셋타입, 에셋, 태스크(스텝), 버전을 판별함. 자동 타임로그가 별도 경로 규칙을 만들지 않음 (구체 클래스는 구현 시 `flova/path.py` 기준으로 확정)
-- 파서 결과 중 자동 타임로그가 사용하는 값: **프로젝트**, **태스크(스텝)**. 스텝은 §5.2 표로 Main Job 변환
+- 경로 해석은 **`flova.model.file.WorkFile`** 사용 (`flova/model/file.py:22`, `WorkFile(work_file, project_code=None)`). 경로 + 파일명으로 프로젝트, 엔티티 타입, 시퀀스, 샷, 에셋타입, 에셋, 스텝, 태스크, 버전을 판별. 자동 타임로그가 별도 경로 규칙을 만들지 않음
+- `WorkFile` 특성
+  - 프로젝트: 경로 세그먼트가 `flova/template/*.yaml` 템플릿 이름과 일치하는 것으로 판별. `project_code` 인자 생략 가능
+  - 스텝: 템플릿의 `ASSET_STEP_CODE_INDEX` / `SHOT_STEP_CODE_INDEX` 위치의 폴더명. 스텝 폴더명 = ShotGrid Step `short_name`
+  - 태스크·버전: 파일명 정규식 (`ASSET_FILENAME_REG` / `SHOT_FILENAME_REG`)
+  - 파싱 자체는 ShotGrid·Redis 불필요. `sg_*()` 계열 접근자만 Redis cache 사용, `sg_asset()`만 ShotGrid 직접 조회 → 자동 타임로그는 `sg_asset()` 호출 금지
+  - 인식 실패 시 예외 없이 `is_valid()`가 False. 파일 존재 여부는 판별에 영향 없음
+  - 드라이브 제한 없음 (`flova.path.WorkPath`는 `G:/M:/V:` 한정이라 사용하지 않음)
+- 자동 타임로그가 사용하는 접근자: `is_valid()`, `project_code()`, `entity_type()`, `step_code()`. 시퀀스·샷·에셋·버전은 사용하지 않음
+- Main Job 변환은 `(entity_type, step_code)` 조합으로 §5.2 표 조회. `layout`, `hair`처럼 Shot과 Asset에서 의미가 다른 스텝이 있으므로 스텝만으로 조회하지 않음
+- TimeLog `sg_main_job`은 한글 표시명 문자열로 저장됨 (`flova/timelog/scripts/set_auto_timelog.py`, `partition_schema.py` 확인). 규칙 엔진은 `MainJob._JOBS[key]` 값을 출력
 - 파서 결과가 있으면 `work` 컨텍스트. 스텝만 불명이면 `project_only`, Main Job은 HumanUser `Default Main Job`
 - **파서가 인식하지 못하는 경로는 무조건 `미분류`**. 로컬 개인 폴더, 바탕화면, 임시 폴더, 파이프라인 규칙 밖 파일명 모두 해당. 보조 판별(파일명 추측, 부분 일치) 금지
 - 인식 불가 = "DCC를 사용하지 않은 것"과 동일하게 취급. §2.6 규칙대로 직전 활성 DCC 컨텍스트 상속. 사용자 알림 없음
 - 미인식 세그먼트는 `fg_process`와 `unmapped_path_root`(드라이브 + 최상위 2단계 폴더)를 기록. §5.4 관리자 목록에서 상습 로컬 작업 파악용
 
-### 5.2 스텝 → Main Job
+### 5.2 스텝 → Main Job (조사 반영 2026-09-11)
 
-| 파이프라인 스텝 | Main Job (`MainJob` 키) |
-|-----------------|-------------------------|
-| comp | `comp` |
-| lit | `lit` |
-| fx | `fx` |
-| anim | `anim` |
-| layout | `layout` |
-| mm | `mm` |
-| mod | `mod` |
-| tex | `tex` |
-| rig | `rig` |
-| roto | `roto` |
-| matte | `matte` |
-| (미정) | 사용자 HumanUser `Default Main Job` |
+- 기존 코드에 스텝 → Main Job 매핑은 존재하지 않음. 이 표가 최초 정의이며 규칙 엔진 상수로 구현
+- 조회 키: `(entity_type, step_code)`. 표에 없는 조합은 HumanUser `Default Main Job` (`sg_auto_project_timelog_main_job`)
+- 스텝 코드 출처: ShotGrid Step `short_name` (Redis `sg:step`, `SGStepCache`) 및 `flova/path.py` `create_shot()`/`create_asset()` 분기
+- 확정 필요 표시(`확인`)는 파이프라인 슈퍼바이저 확인 후 값 고정
 
-- 실제 파이프라인 스텝 코드 확인 후 확정
+Shot 스텝
+
+| step_code | Main Job 키 | 한글명 | 상태 |
+|-----------|-------------|--------|------|
+| comp | `comp` | 합성 | 확정 |
+| lighting | `lit` | 라이팅 | 확정 |
+| fx | `fx` | FX | 확정 |
+| animation | `anim` | Anim 애니메이션 | 확정. `match_anim`은 경로로 구분 불가 |
+| layout | `layout` | Anim 레이아웃 | 확정 |
+| matchmove | `mm` | 매치무브 | 확정. `mm_asset`, `mm_out`은 경로로 구분 불가 |
+| roto | `roto` | 로토스코프 | 확정 |
+| remove | `remove` | 리무브 | 확정 |
+| matte | `matte` | 매트페인팅 | 확정 |
+| motion | `motion` | 모션그래픽 | 확정 (`path.py`에서는 주석 처리, 실사용 여부 확인) |
+| ai | `ai` | AI | 확정 |
+| previz | `previz` | 프리비즈 | 확정 |
+| concept | `concept` | 컨셉 | 확정 |
+| cloth | `cloth` | CFX 클로스 | 확정 |
+| hair | `hair` | CFX 헤어 | 확정 |
+| crowd | `crowd` | CFX 군중 | 확정 |
+| env | `env` | ENV | 확정 |
+| retime | `comp` | 합성 | 확인 |
+| env_layout | `env` | ENV | 확인 (`layout`도 가능) |
+| lookdev | `tex` | 텍스쳐 | 확인 (전용 키 없음) |
+| cfx | — | Default Main Job | 확인 (hair·cloth·crowd 상위 스텝) |
+| asset | — | Default Main Job | 확인 (`asset_layout` 후보) |
+| edit | — | Default Main Job | 확인 (`prod_manager` 또는 `etc` 후보) |
+| plate | — | Default Main Job | 확인 (`tech` 또는 `etc` 후보) |
+| zero | — | Default Main Job | 확인 (`comp` 또는 `tech` 후보) |
+| unreal | — | Default Main Job | 확인 |
+
+Asset 스텝
+
+| step_code | Main Job 키 | 한글명 | 상태 |
+|-----------|-------------|--------|------|
+| model | `mod` | 모델링 | 확정 |
+| rig | `rig` | 리깅 | 확정 |
+| animation | `anim` | Anim 애니메이션 | 확정 |
+| layout | `asset_layout` | 에셋 레이아웃 | 확정 (Shot `layout`과 다름) |
+| hair | `asset_hair` | 에셋 헤어 | 확정 (Shot `hair`와 다름) |
+| env | `env` | ENV | 확정 |
+| fx | `fx` | FX | 확정 |
+| motion | `motion` | 모션그래픽 | 확정 |
+| previz | `previz` | 프리비즈 | 확정 |
+| concept | `concept` | 컨셉 | 확정 |
+| RND | `rnd` | RnD | 확정 |
+| cloth | `cloth` | CFX 클로스 | 확인 (`asset_cloth` 키 없음) |
+| crowd | `crowd` | CFX 군중 | 확인 |
+| matte | `matte` | 매트페인팅 | 확인 |
+| lookdev | `tex` | 텍스쳐 | 확인 |
+| art | `concept` | 컨셉 | 확인 |
+| HDRI | — | Default Main Job | 확인 |
+
+- 경로로 판별 불가능해 수동 입력 전용인 Main Job: `supervising`, `asset_fur`, `mm_asset`, `mm_out`, `match_anim`, `tech`, `prod_manager`, `manage`, `etc`
 
 ### 5.3 앱 분류
 
 | 분류 | 프로세스 예시 | 처리 |
 |------|---------------|------|
 | 감시 대상 DCC | maya.exe, Nuke*.exe, houdini*.exe, 3dsmax.exe, blender.exe, AfterFX.exe, Photoshop.exe, mocha*.exe, SilhouetteFX | 문서 경로 기반 귀속 |
-| 파이프라인 도구 | RV, 사내 PySide2 툴 | 런처 컨텍스트 기반 귀속 |
+| 파이프라인 도구 | RV, 사내 PySide2 툴 | `non_dcc` (상속) |
 | 비DCC 업무 앱 | 브라우저, Mattermost, 오피스, 탐색기 | `미분류` (상속 정책 적용) |
 | 제외 앱 | 게임, 미디어 플레이어 등 명시 목록 | 항상 `idle` |
 
@@ -401,7 +458,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 1. 미분류 세그먼트의 `fg_process`를 관리자 화면에서 사용자·프로세스별 집계, "미분류 상위 프로세스" 목록 제공. 파서 미인식 경로는 `unmapped_path_root`별 집계, "미인식 경로 상위 목록" 제공
 2. 미분류 시간이 반복되는 사용자는 관리자 목록에 노출. 미등록 툴 시간은 비DCC로 분류되어 상속되므로 이 목록으로만 발견 가능
 3. 관리자가 프로세스를 감시 대상 DCC 또는 파이프라인 도구로 등록 → 서버 배포 목록으로 전 에이전트 반영
-4. 플러그인 없는 툴은 창 제목 파싱 규칙 또는 런처 컨텍스트로 귀속
+4. 플러그인 없는 툴은 창 제목 파싱 규칙으로 귀속
 - 도입 초기에는 이 목록을 주 1회 이상 확인, 안정화 후 새 툴 도입 시 확인
 
 ---
@@ -435,7 +492,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 
 - Maya, Nuke, Houdini 플러그인
 - Flova 매핑 규칙 엔진, Redis cache 기반 경로 → Task 조회
-- 런처 컨텍스트 env var 규약 확정 및 파이프라인 런처 반영
+- Houdini 부트스트랩(`menus/scripts/456.py`) 신설
 
 ### Phase 3. 초안 생성 및 웹 UI
 
@@ -479,7 +536,8 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | 2 | Nuke 플러그인 | 미착수 | | |
 | 2 | Houdini 플러그인 | 미착수 | | |
 | 2 | 매핑 규칙 엔진 (Flova) | 미착수 | | |
-| 2 | 런처 컨텍스트 규약 | 미착수 | | |
+| 2 | Houdini 부트스트랩 신설 | 미착수 | | |
+| 2 | DCC 훅 공통 모듈 `dcc_hook.py` | 미착수 | | |
 | 3 | 초안 생성 | 미착수 | | |
 | 3 | 웹 UI 자동분 잠금/미분류 입력 | 미착수 | | |
 | 3 | 미분류 입력 요청 알림 | 미착수 | | |
@@ -596,6 +654,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | 2026-09-08 | 문체를 개조식·명사형 종결로 통일 |
 | 2026-09-08 | 완전 자동화로 목표 변경. 자동 확정 조건, 이의 제기 기간 14일, 사용자 안내 문안 추가 |
 | 2026-09-08 | §10.1 검토 진행 지침 추가 |
+| 2026-09-11 | 조사 반영: 경로 파서 `WorkFile` 확정(§5.1), 스텝→Main Job 표 작성(§5.2), DCC 훅 삽입 지점·전송 방식(§3.3). 런처 컨텍스트 개념 삭제 |
 | 2026-09-11 | §2.1 흐름도·§2.3 판별 규칙을 D-5·D-11 결정과 일치하도록 정리. `non_dcc` 컨텍스트 명시 |
 | 2026-09-10 | D-9 결정: 미분류 입력 기한 경과 시 입력 불가, `expired` 잠금. P-11 대응 방침 확정 |
 | 2026-09-10 | D-4 결정: 공지 + 앱 안내 화면 확인 기록. P-8 해결 |
