@@ -5,7 +5,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 기능 공식 명칭: **자동 타임로그**
 - 영문 식별자: `auto_timelog`
 - 관련 서비스: INFX Works (`project_timelog_web`), INFX Works 데스크톱 앱 (`desktop/`), Flova (`flova.timelog`)
-- 문서 상태: Phase 0 구현 중 (에이전트 프로토타입 완료, PoC 대기)
+- 문서 상태: Phase 1~5 코드 구현 완료 (2026-09-14). 운영 항목(PoC·파일럿 실측, ShotGrid `Auto Timelog Day` 엔티티 슬롯 활성화, cron 등록, 앱 릴리즈) 대기
 
 ---
 
@@ -257,9 +257,9 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 
 | DCC | 부트스트랩 위치 | 훅 삽입 지점 | 이벤트 | 현황 |
 |-----|-----------------|--------------|--------|------|
-| Maya | `flova/maya/startup/userSetup.py` (`PYTHONPATH` 경유, `flova/exec/maya20xx.bat`) | line 77 이후 `cmds.evalDeferred` 블록 추가. `cmds.about(batch=True)` 게이트 유지 | `scriptJob` `SceneOpened`, `SceneSaved`, `NewSceneOpened` | 동일 패턴 기존 사용 (`flova/maya/app/pub_tools.py:2201`) |
-| Nuke | `flova/nuke/menu.py` (`NUKE_PATH` 경유, `flova/app/flova_task/utils.py:53`) | `_setup_callbacks()` (line 253~262)에 추가 | `addOnScriptLoad`, `addOnScriptSave`, `addOnScriptClose` | `addOnScriptLoad`만 기존 사용. Save·Close 신규 |
-| Houdini | `HOUDINI_PATH=flova/houdini/menus` (`flova/exec/houdini20.5.bat:8`) | `flova/houdini/menus/scripts/456.py` 신규 생성 (현재 `flova/houdini/scripts/123.py`는 HOUDINI_PATH 밖이라 로드되지 않음) | `hou.hipFile.addEventCallback` | 기존 콜백 없음. 부트스트랩부터 신규 |
+| Maya | `flova/maya/startup/userSetup.py` (`PYTHONPATH` 경유, `flova/exec/maya20xx.bat`) | `init_deadline` 뒤 `cmds.evalDeferred(_register_auto_timelog_hook)` | `scriptJob` `SceneOpened`, `SceneSaved`, `NewSceneOpened` | **연결 완료 2026-09-14** |
+| Nuke | `flova/nuke/menu.py` (`NUKE_PATH` 경유, `flova/app/flova_task/utils.py:53`) | `_setup_callbacks()` 끝에 `dcc_hook.register_nuke()` | `addOnScriptLoad`, `addOnScriptSave`, `addOnScriptClose` | **연결 완료 2026-09-14** |
+| Houdini | `HOUDINI_PATH=flova/houdini/menus` (`flova/exec/houdini20.5.bat:8`) | `flova/houdini/menus/scripts/456.py` 신규 (세션당 1회 등록 표시) | `hou.hipFile.addEventCallback` | **연결 완료 2026-09-14**. 기존 `flova/houdini/scripts/123.py`는 HOUDINI_PATH 밖이라 여전히 미로드 |
 | Katana | `flova/katana` (`KATANA_RESOURCES`) | `UIPlugins/katana_pulldown_menu.py` onStartup 콜백 옆 | Katana scene callbacks | Phase 2 범위 밖, 추후 |
 | Hiero | `flova/hiero/Python/Startup/init.py` | 동일 | Nuke API 동일 | Phase 2 범위 밖, 추후 |
 | 3ds Max, Blender, After Effects, Photoshop, Substance, Mari | Flova 통합 없음 | 창 제목 파싱 fallback | 제목에 파일 경로가 있는 앱만 | 파일럿 미분류 통계로 우선순위 결정 |
@@ -290,7 +290,30 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 사이드카는 `pythonw -u agent_probe.py`로 실행. Python에 psutil이 없어 ctypes만 사용
 - 확인 완료: 앱 기동 시 사이드카 시작·훅 파이프 리슨·샘플 저장, Python `dcc_hook.send_payload()` → Node 파이프 수신. Git Bash(MSYS)에서는 파이프 경로가 변형되어 실패하므로 검증은 PowerShell·cmd에서 수행
 - 테스트: flova `python -m unittest discover -s flova/timelog/auto_timelog/tests -t .` (18건), desktop `npx vitest run` (auto-timelog 36건)
-- 미구현: 서버 업로드(ShotGrid 스키마 D-1 생성 후), DCC startup 연결, Houdini 부트스트랩
+- Phase 1~5 구현 (2026-09-14)
+
+| 위치 | 파일 | 역할 |
+|------|------|------|
+| flova | `flova/timelog/auto_timelog/mapping.py` | `PathContextResolver`(WorkFile → work/project_only/unclassified), `StepMainJobTable`(§5.2 표) |
+| flova | `flova/timelog/attendance.py` `AttendanceCalculator.get_work_intervals(_from_logs)` | calc_daily와 같은 규칙으로 정규·야근 인정 구간을 구간 목록으로 반환 (자동 타임로그 전용 추가) |
+| flova | `flova/shotgrid/partition_schema.py`, `cache.py` | TimeLog `sg_auto_timelog_source`, HumanUser `sg_auto_timelog`·`sg_auto_timelog_notice_at` cache 필드 |
+| flova | Maya `userSetup.py`, Nuke `menu.py`, Houdini `menus/scripts/456.py` | `dcc_hook.register_*()` 연결 |
+| backend | `timelog/auto_timelog_service.py` | 세그먼트 병합, `AutoTimelogDayRepository`, `DraftBuilder`(분 단위 귀속·상속·반올림·미분류), `judge_day`/`judge_pending_days`(자동 확정, TimeLog 생성), `validate_manual_records_against_auto`, `expire_overdue_days`, 관리자 개요 |
+| backend | `timelog/api_views_auto_timelog.py`, `project_timelog_web/urls.py` | §3.5 API |
+| backend | `timelog/management/commands/auto_timelog_judge.py` | 판정 배치 (cron 12:00) |
+| backend | `timelog/api_views_timelog.py` | 조회 응답에 자동 상태 포함, submit의 auto 잠금·미분류 검증·`manual_unclassified` 태깅 |
+| frontend | `api/autoTimelog.ts`, `stores/timelog.ts`, `types/timelog.ts` | 상태·잠금 플래그(`lockedDayFlags`/`lockedNightFlags`) |
+| frontend | `components/timelog/DayInput.vue`, `NightInput.vue`, `TimeRow.vue` | 자동 셀 잠금 표시(`data-auto-locked`), 잠긴 행은 콤보·삭제 비활성 |
+| frontend | `views/TimelogView.vue` | 미분류 입력 요청·기한 경과 배너 (`data-section="auto-timelog-banner"`) |
+| frontend | `views/NotificationView.vue` | "자동 타임로그 입력 요청" 섹션 (`/api/auto-timelog/unclassified/`) |
+| frontend | `views/admin/AutoTimelogView.vue`, `config/manage-menu.ts`, `router` | 관리자 > 자동 타임로그 (`/manage/auto-timelog`): 상태 집계, 재판정·판정 실행, 미등록 툴·미인식 경로·사용자별 지표 |
+| desktop | `auto-timelog/uploader.ts` | `/status/` 부트스트랩(CSRF), 5분 주기·종료 시 세그먼트 업로드, 403 재부트스트랩 |
+| desktop | `auto-timelog/notice-window.ts` | §12 안내 창. "확인" → `/notice/` 기록 후 수집 시작 |
+| desktop | `auto-timelog/service.ts` | 서버 상태(`enabled`, 안내 확인)로 수집 게이트. 비대상은 수집 안 함. 1시간마다 재확인 |
+
+- 알림: 별도 알림 엔티티 없이 알림 센터가 `/api/auto-timelog/unclassified/`를 조회해 표시. 타임로그 화면 배너와 동일 데이터
+- Main Job 정적 목록(`stores/timelog.ts` `STATIC_MAIN_JOBS`)을 룩뎁·CFX 통합에 맞춰 갱신
+- 미구현·운영 대기: `Auto Timelog Day` 엔티티 슬롯 활성화(UI 작업), cron 등록, 데스크톱 앱 릴리즈 빌드, PoC·파일럿 실측, D-3 월별 배치(범위 밖)
 
 ### 3.4 매핑 규칙 엔진
 
@@ -304,15 +327,21 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 
 | URL | 메서드 | 설명 |
 |-----|--------|------|
-| `/api/auto-timelog/segments` | POST | 세그먼트 업로드 (멱등, UUID 기준) |
-| `/api/auto-timelog/draft` | GET | 지정 날짜 초안 조회 (`?date=YYYY-MM-DD`) |
-| `/api/auto-timelog/draft/rebuild` | POST | 초안 재생성 (관리자 전용, 매핑 규칙·감시 목록 보강 후) |
-| `/api/auto-timelog/unclassified` | GET | 미분류 입력 대기 일자 목록 |
-| `/api/auto-timelog/evidence` | GET | 초안 항목의 귀속 근거 세그먼트 목록 |
-| `/api/admin/auto-timelog/*` | GET/POST | 매핑 규칙 관리, 통계 |
+| `/api/auto-timelog/status/` | GET | 데스크톱 앱 부트스트랩: 대상 여부(`enabled`), 안내 확인 여부, CSRF 토큰 |
+| `/api/auto-timelog/notice/` | POST | 안내 화면 확인 시각 기록 (`sg_auto_timelog_notice_at`) |
+| `/api/auto-timelog/segments/` | POST | 세그먼트 업로드 (멱등, uuid 기준 upsert). 로컬 일자별 `Auto Timelog Day`에 병합 |
+| `/api/auto-timelog/draft/` | GET | 지정 날짜의 세그먼트·초안·상태 (`?date=YYYY-MM-DD`). 근거 타임라인용 |
+| `/api/auto-timelog/unclassified/` | GET | 미분류 입력 대기·기한 경과 일자 목록 |
+| `/api/admin/auto-timelog/overview/` | GET | 상태 집계, 비DCC 상위 프로세스, 미인식 경로 상위, 사용자별 지표 (`?start&end`) |
+| `/api/admin/auto-timelog/rebuild/` | POST | 재판정 (force). `{date, user_id\|null}` |
+| `/api/admin/auto-timelog/judge/` | POST | 판정 배치 수동 실행 + 기한 경과 잠금. `{date}` |
+
+- 구현: `backend/timelog/api_views_auto_timelog.py`, 서비스 `backend/timelog/auto_timelog_service.py`
+- 판정 배치: `python manage.py auto_timelog_judge` (cron, 근무일 12:00). `--date`, `--user-id`, `--force`, `--days` 옵션
+- `/api/timelogs/` 응답에 `is_auto_timelog`, `auto_timelog_days`(날짜→상태·미분류 시간·기한), 항목별 `auto_source` 추가. `/api/timelogs/submit/`은 `sg_auto_timelog_source = auto` 레코드를 교체 대상에서 제외하고, 같은 key 입력은 무시하며, 자동 확정 일자의 수동 입력을 §2.9 규칙으로 검증(400)한 뒤 `manual_unclassified`로 저장하고 `Confirm Status`를 `completed`로 바꾼다
 
 - 응답 형식은 기존 규칙(`{'status': True, 'data': ...}`) 준수
-- 자동분 생성과 미분류 입력 저장 모두 기존 `/api/timelog/submit` 사용. submit은 `sg_auto_timelog_source = auto` 레코드의 갱신·삭제 요청을 거부
+- 자동분 생성은 서비스가 `sg.batch`로 TimeLog를 직접 생성(기존 auto 레코드 삭제 후 재생성, 월 파티션 cache rebuild). 미분류 입력 저장은 기존 `/api/timelogs/submit/`
 
 ### 3.6 웹 UI
 
@@ -369,10 +398,10 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 
 | 엔티티 | 표시 이름 | field code | 용도 |
 |--------|-----------|------------|------|
-| HumanUser | `Auto Timelog` | `sg_auto_timelog` | 자동 타임로그 대상 여부 (checkbox) |
-| HumanUser | `Auto Timelog Notice At` | `sg_auto_timelog_notice_at` | 앱 안내 화면 확인 시각 (date_time) |
-| TimeLog | `Auto Timelog Source` | `sg_auto_timelog_source` | TimeLog 생성 경로 (list: `manual`, `auto`, `manual_unclassified`). `auto`는 수정 잠금 |
-| CustomEntity (신규) `Auto Timelog Day` | `User` | `sg_user` | 대상 사용자 (entity) |
+| HumanUser | `Auto Timelog` | `sg_auto_timelog` | 자동 타임로그 대상 여부 (checkbox). **생성 완료 2026-09-14** |
+| HumanUser | `Auto Timelog Notice At` | `sg_auto_timelog_notice_at` | 앱 안내 화면 확인 시각 (date_time). **생성 완료 2026-09-14** |
+| TimeLog | `Auto Timelog Source` | `sg_auto_timelog_source` | TimeLog 생성 경로 (list: `manual`, `auto`, `manual_unclassified`). `auto`는 수정 잠금. **생성 완료 2026-09-14**. `TimeLogSchema.SG_FIELD_LIST`에 추가됨 |
+| CustomNonProjectEntity21 `Auto Timelog Day` | `User` | `sg_user` | 대상 사용자 (entity). **엔티티 슬롯 활성화 대기**: Site Preferences > Entities에서 `CustomNonProjectEntity21`을 `Auto Timelog Day`로 활성화한 뒤 아래 필드 생성 (API로 엔티티 활성화 불가). 코드 상수 `auto_timelog_service.AUTO_DAY_ENTITY` |
 | `Auto Timelog Day` | `Date` | `sg_date` | 대상 일자 (date) |
 | `Auto Timelog Day` | `Segments` | `sg_segments` | 세그먼트 JSON 배열 (text) |
 | `Auto Timelog Day` | `Draft` | `sg_draft` | 초안 JSON (text) |
@@ -540,6 +569,15 @@ Asset 스텝
 - 자동 프로젝트 타임로그 대상자는 제외 (D-3). 월별 배치 존재 여부 확인
 - 전사 공지 + 앱 안내 화면으로 사용자 안내 문안(§12) 고지
 
+### 배포·운영 체크리스트
+
+1. ShotGrid: Site Preferences > Entities에서 `CustomNonProjectEntity21` 활성화(표시 이름 `Auto Timelog Day`) 후 §4.3 필드 생성. HumanUser·TimeLog 필드는 생성 완료
+2. 대상 지정: HumanUser `Auto Timelog` 체크 (자동 프로젝트 타임로그 대상자는 체크해도 제외)
+3. Redis: TimeLog 월 파티션·사용자 cache rebuild (새 필드 반영)
+4. 배포 서버 cron: `0 12 * * 1-5 cd /home/sysadmin/dev/infx/project_timelog_web/backend && ../.venv/bin/python manage.py auto_timelog_judge`
+5. flova 갱신(배포 서버 `start_project_timelog`, gmdirect devsync), 데스크톱 앱 릴리즈 빌드·배포
+6. 폐쇄망 확인: Git Bash가 아닌 PowerShell·cmd에서 파이프 검증
+
 ### 테스트 원칙
 
 - 매핑 규칙 엔진, 세그먼트 병합, 초안 생성(정규화·반올림)은 TDD 작성
@@ -557,22 +595,22 @@ Asset 스텝
 | 1 | 프로브 사이드카 `agent_probe.py` | 완료 | | ctypes 전용, psutil 미사용 |
 | 1 | 샘플러/세그먼트/SQLite | 완료 | | `desktop/src/main/auto-timelog/` |
 | 1 | 수집 중지 UI | 완료 | | 트레이 메뉴 토글 |
-| 1 | 세그먼트 업로드 API | 미착수 | | |
-| 2 | Maya 플러그인 (userSetup 연결) | 미착수 | | `dcc_hook.register_maya()` 1줄 |
-| 2 | Nuke 플러그인 (menu.py 연결) | 미착수 | | `dcc_hook.register_nuke()` 1줄 |
-| 2 | Houdini 플러그인 (456.py 연결) | 미착수 | | `dcc_hook.register_houdini()` 1줄 |
-| 2 | 매핑 규칙 엔진 (Flova) | 미착수 | | |
-| 2 | Houdini 부트스트랩 신설 | 미착수 | | |
+| 1 | 세그먼트 업로드 API | 완료 | | 2026-09-14. 서버 저장은 엔티티 슬롯 활성화 후 동작 |
+| 2 | Maya 플러그인 (userSetup 연결) | 완료 | | 2026-09-14 |
+| 2 | Nuke 플러그인 (menu.py 연결) | 완료 | | 2026-09-14 |
+| 2 | Houdini 플러그인 (456.py 연결) | 완료 | | 2026-09-14 |
+| 2 | 매핑 규칙 엔진 (Flova) | 완료 | | 2026-09-14 `mapping.py` |
+| 2 | Houdini 부트스트랩 신설 | 완료 | | 2026-09-14 |
 | 2 | DCC 훅 공통 모듈 `dcc_hook.py` | 완료 | | 전송·등록 함수 구현. DCC startup 연결은 미착수 (PoC 후) |
-| 3 | 초안 생성 | 미착수 | | |
-| 3 | 웹 UI 자동분 잠금/미분류 입력 | 미착수 | | |
-| 3 | 미분류 입력 요청 알림 | 미착수 | | |
-| 3 | ShotGrid 필드 생성 | 미착수 | | 코드 배포 전 선행 |
-| 3 | 앱 안내 화면 및 확인 기록 | 미착수 | | |
-| 4 | 파일럿 운영 (사용자 확정 모드) | 미착수 | | |
-| 4 | 관리자 화면 | 미착수 | | |
-| 5 | 자동 확정 전환 | 미착수 | | |
-| 5 | 전사 확대 | 미착수 | | |
+| 3 | 초안 생성 | 완료 | | 2026-09-14 `DraftBuilder` |
+| 3 | 웹 UI 자동분 잠금/미분류 입력 | 완료 | | 2026-09-14 |
+| 3 | 미분류 입력 요청 알림 | 완료 | | 2026-09-14 알림 센터 섹션·타임로그 배너 |
+| 3 | ShotGrid 필드 생성 | 진행 중 | | HumanUser·TimeLog 필드 완료. `Auto Timelog Day` 엔티티 슬롯 활성화·필드 생성 대기 |
+| 3 | 앱 안내 화면 및 확인 기록 | 완료 | | 2026-09-14 |
+| 4 | 파일럿 운영 (사용자 확정 모드) | 미착수 | | 운영 항목. 코드는 자동 확정 모드로 구현되어 있어 파일럿은 대상자 소수 지정으로 대체 가능 |
+| 4 | 관리자 화면 | 완료 | | 2026-09-14 `/manage/auto-timelog` |
+| 5 | 자동 확정 전환 | 완료(코드) | | 판정 배치가 자동 확정 수행. cron 등록은 운영 항목 |
+| 5 | 전사 확대 | 미착수 | | 운영 항목. HumanUser `Auto Timelog` 체크로 단계적 확대 |
 
 - 상태 값: `미착수`, `진행 중`, `완료`, `보류`
 
@@ -680,6 +718,7 @@ Asset 스텝
 | 2026-09-08 | 문체를 개조식·명사형 종결로 통일 |
 | 2026-09-08 | 완전 자동화로 목표 변경. 자동 확정 조건, 이의 제기 기간 14일, 사용자 안내 문안 추가 |
 | 2026-09-08 | §10.1 검토 진행 지침 추가 |
+| 2026-09-14 | Phase 1~5 코드 구현: 매핑 엔진, 인정 구간 함수, 서버 서비스·API·판정 배치, submit 잠금·검증, 웹 UI(잠금·배너·알림·관리자), 데스크톱 업로더·안내 창, DCC startup 연결, ShotGrid HumanUser·TimeLog 필드 생성. §3.5·§4.3·§6·§7 갱신 |
 | 2026-09-14 | Phase 0 에이전트 프로토타입 구현 (flova 사이드카·훅, desktop 에이전트). §3.3.1 구현 메모, §7 상태 갱신 |
 | 2026-09-11 | §5.2 확정: cfx·hair·cloth·crowd→cfx. Main Job CFX 헤어/클로스/군중을 CFX로 통합, TimeLog 239건 변경, stats alias 보강 |
 | 2026-09-11 | §5.2 확정: retime→comp, env_layout→env, lookdev→lookdev(신규 Main Job, 기존 텍스쳐 항목을 룩뎁으로 변경) |
