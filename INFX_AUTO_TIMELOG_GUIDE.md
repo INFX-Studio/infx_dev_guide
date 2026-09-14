@@ -5,7 +5,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 기능 공식 명칭: **자동 타임로그**
 - 영문 식별자: `auto_timelog`
 - 관련 서비스: INFX Works (`project_timelog_web`), INFX Works 데스크톱 앱 (`desktop/`), Flova (`flova.timelog`)
-- 문서 상태: 설계 단계 (구현 미착수)
+- 문서 상태: Phase 0 구현 중 (에이전트 프로토타입 완료, PoC 대기)
 
 ---
 
@@ -265,6 +265,32 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | 3ds Max, Blender, After Effects, Photoshop, Substance, Mari | Flova 통합 없음 | 창 제목 파싱 fallback | 제목에 파일 경로가 있는 앱만 | 파일럿 미분류 통계로 우선순위 결정 |
 
 - DCC Python 버전: Maya 2022 = 3.7.7 (제약 기준), Maya 2024 = 3.10, Nuke 14/15 = 3.9/3.10, Houdini 20.5 = 3.11, Katana 7 = 3.10. 훅 모듈은 3.7 문법 준수
+
+### 3.3.1 구현 메모 (2026-09-14, Phase 0)
+
+- 구현 파일
+
+| 위치 | 파일 | 역할 |
+|------|------|------|
+| flova | `flova/timelog/auto_timelog/agent_probe.py` | 사이드카 엔트리. `--interval`, `--watch` 인자. stdin 닫히면 종료 |
+| flova | `flova/timelog/auto_timelog/probe_core.py` | WatchList, CpuUsageTracker, 샘플 조립 (순수 로직, 테스트 대상) |
+| flova | `flova/timelog/auto_timelog/probe_win32.py` | ctypes Win32 (GetForegroundWindow, Toolhelp32, GetProcessTimes) |
+| flova | `flova/timelog/auto_timelog/dcc_hook.py` | named pipe 전송, `register_maya/nuke/houdini()` |
+| desktop | `src/main/auto-timelog/config.ts` | 상수(주기 5초, idle 600초, CPU 임계 20%, 최소 세그먼트 60초, 감시 목록) |
+| desktop | `src/main/auto-timelog/probe-process.ts` | 사이드카 spawn·파싱·재시작(연속 실패 5회 시 중단) |
+| desktop | `src/main/auto-timelog/classify.ts` | 샘플 → 컨텍스트, 머신 시간 후보 |
+| desktop | `src/main/auto-timelog/segments.ts` | 세그먼트 병합, 짧은 구간 흡수(`onDiscard`), 시간 공백 분리 |
+| desktop | `src/main/auto-timelog/store.ts` | `node:sqlite` 로컬 DB (`%APPDATA%/inFX Works 데스크톱 앱/auto-timelog.sqlite`) |
+| desktop | `src/main/auto-timelog/hook-server.ts` | 훅 수신 파이프 서버, PID→문서 경로 레지스트리 |
+| desktop | `src/main/auto-timelog/service.ts` | 조립·수명·잠금/절전·일시 중지 |
+| desktop | `src/main/index.ts` | 앱 시작 시 서비스 기동, powerMonitor 연결, 트레이 메뉴 |
+
+- 에이전트 컨텍스트 종류는 `dcc`, `non_dcc`, `idle`, `wait`, `paused`, `machine`. 경로 파서 판정(`work`/`project_only`/`unclassified`)은 서버가 수행하므로 에이전트는 문서 경로 유무까지만 기록
+- 열린 세그먼트는 샘플마다 스냅샷 upsert. 강제 종료 시에도 마지막 샘플까지 남음
+- 사이드카는 `pythonw -u agent_probe.py`로 실행. Python에 psutil이 없어 ctypes만 사용
+- 확인 완료: 앱 기동 시 사이드카 시작·훅 파이프 리슨·샘플 저장, Python `dcc_hook.send_payload()` → Node 파이프 수신. Git Bash(MSYS)에서는 파이프 경로가 변형되어 실패하므로 검증은 PowerShell·cmd에서 수행
+- 테스트: flova `python -m unittest discover -s flova/timelog/auto_timelog/tests -t .` (18건), desktop `npx vitest run` (auto-timelog 36건)
+- 미구현: 서버 업로드(ShotGrid 스키마 D-1 생성 후), DCC startup 연결, Houdini 부트스트랩
 
 ### 3.4 매핑 규칙 엔진
 
@@ -526,18 +552,18 @@ Asset 스텝
 
 | Phase | 항목 | 상태 | 담당 | 비고 |
 |-------|------|------|------|------|
-| 0 | 에이전트 프로토타입 | 미착수 | | |
+| 0 | 에이전트 프로토타입 | 완료 | | 2026-09-14. 사이드카·샘플러·세그먼트·SQLite·훅 서버·트레이 중지 |
 | 0 | PoC 결과 정리 | 미착수 | | |
-| 1 | 프로브 사이드카 `agent_probe.py` | 미착수 | | |
-| 1 | 샘플러/세그먼트/SQLite | 미착수 | | |
-| 1 | 수집 중지 UI | 미착수 | | |
+| 1 | 프로브 사이드카 `agent_probe.py` | 완료 | | ctypes 전용, psutil 미사용 |
+| 1 | 샘플러/세그먼트/SQLite | 완료 | | `desktop/src/main/auto-timelog/` |
+| 1 | 수집 중지 UI | 완료 | | 트레이 메뉴 토글 |
 | 1 | 세그먼트 업로드 API | 미착수 | | |
-| 2 | Maya 플러그인 | 미착수 | | |
-| 2 | Nuke 플러그인 | 미착수 | | |
-| 2 | Houdini 플러그인 | 미착수 | | |
+| 2 | Maya 플러그인 (userSetup 연결) | 미착수 | | `dcc_hook.register_maya()` 1줄 |
+| 2 | Nuke 플러그인 (menu.py 연결) | 미착수 | | `dcc_hook.register_nuke()` 1줄 |
+| 2 | Houdini 플러그인 (456.py 연결) | 미착수 | | `dcc_hook.register_houdini()` 1줄 |
 | 2 | 매핑 규칙 엔진 (Flova) | 미착수 | | |
 | 2 | Houdini 부트스트랩 신설 | 미착수 | | |
-| 2 | DCC 훅 공통 모듈 `dcc_hook.py` | 미착수 | | |
+| 2 | DCC 훅 공통 모듈 `dcc_hook.py` | 완료 | | 전송·등록 함수 구현. DCC startup 연결은 미착수 (PoC 후) |
 | 3 | 초안 생성 | 미착수 | | |
 | 3 | 웹 UI 자동분 잠금/미분류 입력 | 미착수 | | |
 | 3 | 미분류 입력 요청 알림 | 미착수 | | |
@@ -654,6 +680,7 @@ Asset 스텝
 | 2026-09-08 | 문체를 개조식·명사형 종결로 통일 |
 | 2026-09-08 | 완전 자동화로 목표 변경. 자동 확정 조건, 이의 제기 기간 14일, 사용자 안내 문안 추가 |
 | 2026-09-08 | §10.1 검토 진행 지침 추가 |
+| 2026-09-14 | Phase 0 에이전트 프로토타입 구현 (flova 사이드카·훅, desktop 에이전트). §3.3.1 구현 메모, §7 상태 갱신 |
 | 2026-09-11 | §5.2 확정: cfx·hair·cloth·crowd→cfx. Main Job CFX 헤어/클로스/군중을 CFX로 통합, TimeLog 239건 변경, stats alias 보강 |
 | 2026-09-11 | §5.2 확정: retime→comp, env_layout→env, lookdev→lookdev(신규 Main Job, 기존 텍스쳐 항목을 룩뎁으로 변경) |
 | 2026-09-11 | 조사 반영: 경로 파서 `WorkFile` 확정(§5.1), 스텝→Main Job 표 작성(§5.2), DCC 훅 삽입 지점·전송 방식(§3.3). 런처 컨텍스트 개념 삭제 |
