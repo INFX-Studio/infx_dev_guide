@@ -5,7 +5,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 기능 공식 명칭: **자동 타임로그**
 - 영문 식별자: `auto_timelog`
 - 관련 서비스: INFX Works (`project_timelog_web`), INFX Works 데스크톱 앱 (`desktop/`), Flova (`flova.timelog`)
-- 문서 상태: Phase 1~5 코드 구현·ShotGrid 스키마 완료 (2026-09-15). 운영 항목(대상자 지정, cron 등록, flova·앱 배포, PoC·파일럿 실측) 대기
+- 문서 상태: **전사 수집 베타(collect 모드)** 진행 단계 (2026-09-15). 자동 확정(confirm 모드) 코드는 완료, 베타 데이터로 초안 품질 확인 후 전환
 
 ---
 
@@ -28,6 +28,16 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 자동 프로젝트 타임로그 대상자(`sg_auto_project_timelog = True`)는 **자동 타임로그 대상에서 제외** (D-3). 에이전트 미가동, 세그먼트 미수집
 - 해당 사용자는 매월 초 직전 달 근무일 전체에 대해 `Default Project`·`Default Main Job`으로 TimeLog를 일괄 생성하는 월별 배치로 처리. 이 배치는 자동 프로젝트 타임로그 기능의 일부이며 자동 타임로그 범위 밖 (기존 구현 여부 확인 후 없으면 별도 작업)
 - 대상 판정 우선순위: `sg_auto_project_timelog = True`이면 `sg_auto_timelog` 값과 무관하게 제외
+
+### 1.2.1 운영 모드 (2026-09-15 베타 결정)
+
+| 모드 | 설정 | 대상 | 동작 |
+|------|------|------|------|
+| `collect` (현재, 베타) | `AUTO_TIMELOG_MODE=collect` (기본값) | INFX Works에 로그인한 전 사용자. 자동 프로젝트 타임로그 대상자 포함 | 데스크톱 앱이 실행 중인 동안 수집·업로드. 판정 배치는 초안만 저장(`Confirm Status = draft`), TimeLog 미생성. 타임로그 화면·알림·제출 검증 변화 없음. 관리자 화면에서 초안 vs 수동 입력 일치율 관찰 |
+| `confirm` | `AUTO_TIMELOG_MODE=confirm` | HumanUser `Auto Timelog` 대상자 (자동 프로젝트 타임로그 대상자 제외, D-3) | §2.8 자동 확정·잠금, §2.9 미분류 입력 |
+
+- 베타 원칙: 사용자 업무를 방해하지 않고 웍스 오류를 만들지 않는다. 수집 실패는 모두 무시·로그만 남기고, 앱·DCC·웹 어느 쪽도 예외를 사용자에게 노출하지 않는다
+- 앱 내 수집 안내 화면은 폐지(D-4 변경). 고지는 전사 공지로만 수행
 
 ### 1.3 설계 원칙
 
@@ -313,7 +323,8 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 
 - 알림: 별도 알림 엔티티 없이 알림 센터가 `/api/auto-timelog/unclassified/`를 조회해 표시. 타임로그 화면 배너와 동일 데이터
 - Main Job 정적 목록(`stores/timelog.ts` `STATIC_MAIN_JOBS`)을 룩뎁·CFX 통합에 맞춰 갱신
-- 미구현·운영 대기: `Auto Timelog Day` 엔티티 슬롯 활성화(UI 작업), cron 등록, 데스크톱 앱 릴리즈 빌드, PoC·파일럿 실측, D-3 월별 배치(범위 밖)
+- 베타 전환 (2026-09-15): `settings.AUTO_TIMELOG_MODE`, `auto_timelog_service.is_collect_only()/is_auto_confirm_enabled()`, 판정 배치 `draft` 저장, `compare_draft_with_manual()`(초안 vs 수동 TimeLog 일치율), 관리자 화면 모드·일치율 표시. 데스크톱: 안내 창 제거, 업로드 15분 주기·닫힌 세그먼트만. DCC 훅 전송은 daemon 스레드
+- 운영 대기: 배포 서버 `start-project-timelog`(cron 설치 포함) 실행, cache rebuild, D-3 월별 배치(범위 밖)
 
 ### 3.4 매핑 규칙 엔진
 
@@ -572,7 +583,7 @@ Asset 스텝
 ### 배포·운영 체크리스트
 
 1. ShotGrid 스키마: 완료 (2026-09-15). `Auto Timelog Day` 엔티티·필드, HumanUser·TimeLog 필드 모두 생성됨
-2. 대상 지정: 완료(PoC 1명). 2026-09-15 기경훈 TD(4510)의 `sg_auto_project_timelog`를 False로 바꾸고 `Auto Timelog` 체크 → PoC 첫 대상. 되돌리려면 두 값을 원복. 아티스트·원격 사용자 추가 지정은 HumanUser `Auto Timelog` 체크로 진행
+2. 대상 지정: collect 모드에서는 불필요(전 사용자). confirm 전환 시 HumanUser `Auto Timelog` 체크. 기경훈 TD(4510)는 2026-09-15 `sg_auto_project_timelog=False`, `Auto Timelog=True`로 변경된 상태 (원복 가능)
 3. Redis: TimeLog 월 파티션·사용자 cache rebuild (새 필드 반영)
 4. 배포 서버 cron: 완료(코드). `start-project-timelog`가 `deploy/cron/infx-works-auto-timelog-judge`를 `/etc/cron.d/`에 설치 (근무일 12:00). 다음 배포 시 자동 반영
 5. flova 갱신·앱 릴리즈: gmdirect devsync push 완료, 데스크톱 v1.02.088 `W:/inhouse/InfxWorks` 배치 완료. 배포 서버 `start-project-timelog` 실행은 keekee에서 SSH 키 인증이 안 되어(비밀번호 인증만 허용) devtask `20260915-095126-deploy-auto-timelog`(manual)로 gmdirect 콘솔에 절차를 넣어 둠. 실행 후 사용자·TimeLog 2026-09 cache rebuild와 `auto_timelog_judge --days 1` 확인
@@ -608,7 +619,7 @@ Asset 스텝
 | 3 | 미분류 입력 요청 알림 | 완료 | | 2026-09-14 알림 센터 섹션·타임로그 배너 |
 | 3 | ShotGrid 필드 생성 | 완료 | | 2026-09-15. `Auto Timelog Day` 엔티티(수동 활성화)·필드 8개, HumanUser 2개, TimeLog 1개 |
 | 3 | 앱 안내 화면 및 확인 기록 | 완료 | | 2026-09-14 |
-| 4 | 파일럿 운영 (사용자 확정 모드) | 미착수 | | 운영 항목. 코드는 자동 확정 모드로 구현되어 있어 파일럿은 대상자 소수 지정으로 대체 가능 |
+| 4 | 전사 수집 베타 (collect 모드) | 진행 중 | | 2026-09-15 시작. 데스크톱 v1.02.089 배포 후 관리자 화면 초안 일치율·미등록 툴·미인식 경로 관찰 |
 | 4 | 관리자 화면 | 완료 | | 2026-09-14 `/manage/auto-timelog` |
 | 5 | 자동 확정 전환 | 완료(코드) | | 판정 배치가 자동 확정 수행. cron 등록은 운영 항목 |
 | 5 | 전사 확대 | 미착수 | | 운영 항목. HumanUser `Auto Timelog` 체크로 단계적 확대 |
@@ -666,7 +677,7 @@ Asset 스텝
 | D-1 | 세그먼트·초안 서버 저장 위치 | §4.2 후보 3가지 | 사용자·일자 1레코드 + JSON 텍스트 필드 (ShotGrid) | **결정** (2026-09-08). 세그먼트 단위 검색 불필요, 사용자·일자 단위 조회만 필요 |
 | D-2 | 포어그라운드 창 조회 구현 방식 | Python 사이드카 / 네이티브 addon / PowerShell 주기 호출 | Python 사이드카 | **결정** (2026-09-08). 기존 Flova Python·AMI 워커 관리 코드 재사용, 빌드 체인 무영향 |
 | D-3 | 자동 프로젝트 타임로그 대상자 처리 | 제외 / 대체 / 병행 | 제외 | **결정** (2026-09-10): 제외. 해당 사용자는 매월 초 직전 달 일괄 기입 배치로 처리 (자동 타임로그 범위 밖) |
-| D-4 | 수집 고지·동의 절차 | 사내 공지 / 앱 최초 실행 시 안내 화면 / 둘 다 | 둘 다 | **결정** (2026-09-10): 둘 다. 단계별 공지(PoC 개별, 파일럿 부서, 전사) + 앱 확인 시각 기록 |
+| D-4 | 수집 고지·동의 절차 | 사내 공지 / 앱 최초 실행 시 안내 화면 / 둘 다 | 둘 다 | **변경** (2026-09-15): 앱 안내 화면 폐지, 전사 공지만. `/api/auto-timelog/notice/`·`sg_auto_timelog_notice_at`는 미사용으로 잔존 |
 | D-5 | 하루 합계 산정 방식 | 실측 / 비율 정규화 / 분 단위 귀속 | 비율 정규화 + 실측 보존 | **결정** (2026-09-08): **출퇴근 인정 구간 위 분 단위 귀속**, idle도 직전 컨텍스트 상속. 정규화 폐기, 실측값은 초안 JSON에 보존 |
 | D-6 | idle 임계값 | 3분 / 5분 / 10분 | 5분 | **결정** (2026-09-08): **10분**. 오탐 최소화 우선. 서버 배포 정책 값으로 조정 가능 |
 | D-7 | 미분류 시간 기본 정책 | 상속(상한 30분) / 상속(상한 없음) / 비율 배분 / 미배정 | 상속(상한 30분) | **결정** (2026-09-08): **직전 활성 DCC 컨텍스트 상속, 상한 없음** + fallback 사슬. 규칙 단순성과 완전 자동화 우선 |
@@ -719,6 +730,7 @@ Asset 스텝
 | 2026-09-08 | 문체를 개조식·명사형 종결로 통일 |
 | 2026-09-08 | 완전 자동화로 목표 변경. 자동 확정 조건, 이의 제기 기간 14일, 사용자 안내 문안 추가 |
 | 2026-09-08 | §10.1 검토 진행 지침 추가 |
+| 2026-09-15 | 전사 수집 베타 전환: `AUTO_TIMELOG_MODE`(collect/confirm), 초안 전용 판정, 초안 일치율 지표, 안내 창 폐지(D-4 변경), 업로드 완화, DCC 훅 스레드 전송. §1.2.1 신설 |
 | 2026-09-15 | ShotGrid `Auto Timelog Day` 엔티티 활성화(사용자)·필드 8개 생성, 저장소 실측 확인. 판정 배치를 개발 Redis 실데이터로 실측(인정 구간·퇴근 판정 정상). cron을 배포 스크립트에 편입. flova·가이드 devsync push. §4.3·§6·§7 갱신 |
 | 2026-09-14 | Phase 1~5 코드 구현: 매핑 엔진, 인정 구간 함수, 서버 서비스·API·판정 배치, submit 잠금·검증, 웹 UI(잠금·배너·알림·관리자), 데스크톱 업로더·안내 창, DCC startup 연결, ShotGrid HumanUser·TimeLog 필드 생성. §3.5·§4.3·§6·§7 갱신 |
 | 2026-09-14 | Phase 0 에이전트 프로토타입 구현 (flova 사이드카·훅, desktop 에이전트). §3.3.1 구현 메모, §7 상태 갱신 |
