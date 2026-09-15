@@ -572,11 +572,12 @@ Asset 스텝
 ### 배포·운영 체크리스트
 
 1. ShotGrid 스키마: 완료 (2026-09-15). `Auto Timelog Day` 엔티티·필드, HumanUser·TimeLog 필드 모두 생성됨
-2. 대상 지정: HumanUser `Auto Timelog` 체크 (자동 프로젝트 타임로그 대상자는 체크해도 제외)
+2. 대상 지정: HumanUser `Auto Timelog` 체크 (자동 프로젝트 타임로그 대상자는 체크해도 제외). 2026-09-15 기경훈 TD에 체크했으나 `sg_auto_project_timelog = True`라 D-3 규칙으로 제외됨. PoC 대상은 자동 프로젝트 타임로그 미대상 아티스트로 지정 필요
 3. Redis: TimeLog 월 파티션·사용자 cache rebuild (새 필드 반영)
-4. 배포 서버 cron: `0 12 * * 1-5 cd /home/sysadmin/dev/infx/project_timelog_web/backend && ../.venv/bin/python manage.py auto_timelog_judge`
+4. 배포 서버 cron: 완료(코드). `start-project-timelog`가 `deploy/cron/infx-works-auto-timelog-judge`를 `/etc/cron.d/`에 설치 (근무일 12:00). 다음 배포 시 자동 반영
 5. flova 갱신(배포 서버 `start_project_timelog`, gmdirect devsync), 데스크톱 앱 릴리즈 빌드·배포
 6. 폐쇄망 확인: Git Bash가 아닌 PowerShell·cmd에서 파이프 검증
+7. 판정 배치 실측: 개발 Redis(출퇴근·사용자·TimeLog cache 실데이터)로 2026-09-15 실행. 출퇴근 인정 구간 산출·퇴근 판정·저장소 upsert 정상, 세그먼트 없음 → `pending/low_coverage`. 새 필드 반영을 위해 사용자 cache와 TimeLog 월 파티션 rebuild 필요(개발 Redis는 rebuild 완료, 배포 서버는 배포 후 수행)
 
 ### 테스트 원칙
 
@@ -718,7 +719,7 @@ Asset 스텝
 | 2026-09-08 | 문체를 개조식·명사형 종결로 통일 |
 | 2026-09-08 | 완전 자동화로 목표 변경. 자동 확정 조건, 이의 제기 기간 14일, 사용자 안내 문안 추가 |
 | 2026-09-08 | §10.1 검토 진행 지침 추가 |
-| 2026-09-15 | ShotGrid `Auto Timelog Day` 엔티티 활성화(사용자)·필드 8개 생성, 저장소 실측 확인. §4.3·§6·§7 갱신 |
+| 2026-09-15 | ShotGrid `Auto Timelog Day` 엔티티 활성화(사용자)·필드 8개 생성, 저장소 실측 확인. 판정 배치를 개발 Redis 실데이터로 실측(인정 구간·퇴근 판정 정상). cron을 배포 스크립트에 편입. flova·가이드 devsync push. §4.3·§6·§7 갱신 |
 | 2026-09-14 | Phase 1~5 코드 구현: 매핑 엔진, 인정 구간 함수, 서버 서비스·API·판정 배치, submit 잠금·검증, 웹 UI(잠금·배너·알림·관리자), 데스크톱 업로더·안내 창, DCC startup 연결, ShotGrid HumanUser·TimeLog 필드 생성. §3.5·§4.3·§6·§7 갱신 |
 | 2026-09-14 | Phase 0 에이전트 프로토타입 구현 (flova 사이드카·훅, desktop 에이전트). §3.3.1 구현 메모, §7 상태 갱신 |
 | 2026-09-11 | §5.2 확정: cfx·hair·cloth·crowd→cfx. Main Job CFX 헤어/클로스/군중을 CFX로 통합, TimeLog 239건 변경, stats alias 보강 |
