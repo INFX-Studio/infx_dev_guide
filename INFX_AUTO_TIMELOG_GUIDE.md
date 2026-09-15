@@ -5,7 +5,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 기능 공식 명칭: **자동 타임로그**
 - 영문 식별자: `auto_timelog`
 - 관련 서비스: INFX Works (`project_timelog_web`), INFX Works 데스크톱 앱 (`desktop/`), Flova (`flova.timelog`)
-- 문서 상태: Phase 1~5 코드 구현 완료 (2026-09-14). 운영 항목(PoC·파일럿 실측, ShotGrid `Auto Timelog Day` 엔티티 슬롯 활성화, cron 등록, 앱 릴리즈) 대기
+- 문서 상태: Phase 1~5 코드 구현·ShotGrid 스키마 완료 (2026-09-15). 운영 항목(대상자 지정, cron 등록, flova·앱 배포, PoC·파일럿 실측) 대기
 
 ---
 
@@ -401,7 +401,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | HumanUser | `Auto Timelog` | `sg_auto_timelog` | 자동 타임로그 대상 여부 (checkbox). **생성 완료 2026-09-14** |
 | HumanUser | `Auto Timelog Notice At` | `sg_auto_timelog_notice_at` | 앱 안내 화면 확인 시각 (date_time). **생성 완료 2026-09-14** |
 | TimeLog | `Auto Timelog Source` | `sg_auto_timelog_source` | TimeLog 생성 경로 (list: `manual`, `auto`, `manual_unclassified`). `auto`는 수정 잠금. **생성 완료 2026-09-14**. `TimeLogSchema.SG_FIELD_LIST`에 추가됨 |
-| CustomNonProjectEntity21 `Auto Timelog Day` | `User` | `sg_user` | 대상 사용자 (entity). **엔티티 슬롯 활성화 대기**: Site Preferences > Entities에서 `CustomNonProjectEntity21`을 `Auto Timelog Day`로 활성화한 뒤 아래 필드 생성 (API로 엔티티 활성화 불가). 코드 상수 `auto_timelog_service.AUTO_DAY_ENTITY` |
+| CustomNonProjectEntity21 `Auto Timelog Day` | `User` | `sg_user` | 대상 사용자 (entity). **엔티티·필드 생성 완료 2026-09-15** (엔티티는 Site Preferences에서 수동 활성화, 필드 8개는 API 생성). 코드 상수 `auto_timelog_service.AUTO_DAY_ENTITY`. 레코드 create/get/update/find_range 실측 확인 |
 | `Auto Timelog Day` | `Date` | `sg_date` | 대상 일자 (date) |
 | `Auto Timelog Day` | `Segments` | `sg_segments` | 세그먼트 JSON 배열 (text) |
 | `Auto Timelog Day` | `Draft` | `sg_draft` | 초안 JSON (text) |
@@ -571,7 +571,7 @@ Asset 스텝
 
 ### 배포·운영 체크리스트
 
-1. ShotGrid: Site Preferences > Entities에서 `CustomNonProjectEntity21` 활성화(표시 이름 `Auto Timelog Day`) 후 §4.3 필드 생성. HumanUser·TimeLog 필드는 생성 완료
+1. ShotGrid 스키마: 완료 (2026-09-15). `Auto Timelog Day` 엔티티·필드, HumanUser·TimeLog 필드 모두 생성됨
 2. 대상 지정: HumanUser `Auto Timelog` 체크 (자동 프로젝트 타임로그 대상자는 체크해도 제외)
 3. Redis: TimeLog 월 파티션·사용자 cache rebuild (새 필드 반영)
 4. 배포 서버 cron: `0 12 * * 1-5 cd /home/sysadmin/dev/infx/project_timelog_web/backend && ../.venv/bin/python manage.py auto_timelog_judge`
@@ -605,7 +605,7 @@ Asset 스텝
 | 3 | 초안 생성 | 완료 | | 2026-09-14 `DraftBuilder` |
 | 3 | 웹 UI 자동분 잠금/미분류 입력 | 완료 | | 2026-09-14 |
 | 3 | 미분류 입력 요청 알림 | 완료 | | 2026-09-14 알림 센터 섹션·타임로그 배너 |
-| 3 | ShotGrid 필드 생성 | 진행 중 | | HumanUser·TimeLog 필드 완료. `Auto Timelog Day` 엔티티 슬롯 활성화·필드 생성 대기 |
+| 3 | ShotGrid 필드 생성 | 완료 | | 2026-09-15. `Auto Timelog Day` 엔티티(수동 활성화)·필드 8개, HumanUser 2개, TimeLog 1개 |
 | 3 | 앱 안내 화면 및 확인 기록 | 완료 | | 2026-09-14 |
 | 4 | 파일럿 운영 (사용자 확정 모드) | 미착수 | | 운영 항목. 코드는 자동 확정 모드로 구현되어 있어 파일럿은 대상자 소수 지정으로 대체 가능 |
 | 4 | 관리자 화면 | 완료 | | 2026-09-14 `/manage/auto-timelog` |
@@ -718,6 +718,7 @@ Asset 스텝
 | 2026-09-08 | 문체를 개조식·명사형 종결로 통일 |
 | 2026-09-08 | 완전 자동화로 목표 변경. 자동 확정 조건, 이의 제기 기간 14일, 사용자 안내 문안 추가 |
 | 2026-09-08 | §10.1 검토 진행 지침 추가 |
+| 2026-09-15 | ShotGrid `Auto Timelog Day` 엔티티 활성화(사용자)·필드 8개 생성, 저장소 실측 확인. §4.3·§6·§7 갱신 |
 | 2026-09-14 | Phase 1~5 코드 구현: 매핑 엔진, 인정 구간 함수, 서버 서비스·API·판정 배치, submit 잠금·검증, 웹 UI(잠금·배너·알림·관리자), 데스크톱 업로더·안내 창, DCC startup 연결, ShotGrid HumanUser·TimeLog 필드 생성. §3.5·§4.3·§6·§7 갱신 |
 | 2026-09-14 | Phase 0 에이전트 프로토타입 구현 (flova 사이드카·훅, desktop 에이전트). §3.3.1 구현 메모, §7 상태 갱신 |
 | 2026-09-11 | §5.2 확정: cfx·hair·cloth·crowd→cfx. Main Job CFX 헤어/클로스/군중을 CFX로 통합, TimeLog 239건 변경, stats alias 보강 |
