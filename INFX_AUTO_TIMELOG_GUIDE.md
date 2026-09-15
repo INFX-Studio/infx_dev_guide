@@ -572,10 +572,10 @@ Asset 스텝
 ### 배포·운영 체크리스트
 
 1. ShotGrid 스키마: 완료 (2026-09-15). `Auto Timelog Day` 엔티티·필드, HumanUser·TimeLog 필드 모두 생성됨
-2. 대상 지정: HumanUser `Auto Timelog` 체크 (자동 프로젝트 타임로그 대상자는 체크해도 제외). 2026-09-15 기경훈 TD에 체크했으나 `sg_auto_project_timelog = True`라 D-3 규칙으로 제외됨. PoC 대상은 자동 프로젝트 타임로그 미대상 아티스트로 지정 필요
+2. 대상 지정: 완료(PoC 1명). 2026-09-15 기경훈 TD(4510)의 `sg_auto_project_timelog`를 False로 바꾸고 `Auto Timelog` 체크 → PoC 첫 대상. 되돌리려면 두 값을 원복. 아티스트·원격 사용자 추가 지정은 HumanUser `Auto Timelog` 체크로 진행
 3. Redis: TimeLog 월 파티션·사용자 cache rebuild (새 필드 반영)
 4. 배포 서버 cron: 완료(코드). `start-project-timelog`가 `deploy/cron/infx-works-auto-timelog-judge`를 `/etc/cron.d/`에 설치 (근무일 12:00). 다음 배포 시 자동 반영
-5. flova 갱신(배포 서버 `start_project_timelog`, gmdirect devsync), 데스크톱 앱 릴리즈 빌드·배포
+5. flova 갱신·앱 릴리즈: gmdirect devsync push 완료, 데스크톱 v1.02.088 `W:/inhouse/InfxWorks` 배치 완료. 배포 서버 `start-project-timelog` 실행은 keekee에서 SSH 키 인증이 안 되어(비밀번호 인증만 허용) devtask `20260915-095126-deploy-auto-timelog`(manual)로 gmdirect 콘솔에 절차를 넣어 둠. 실행 후 사용자·TimeLog 2026-09 cache rebuild와 `auto_timelog_judge --days 1` 확인
 6. 폐쇄망 확인: Git Bash가 아닌 PowerShell·cmd에서 파이프 검증
 7. 판정 배치 실측: 개발 Redis(출퇴근·사용자·TimeLog cache 실데이터)로 2026-09-15 실행. 출퇴근 인정 구간 산출·퇴근 판정·저장소 upsert 정상, 세그먼트 없음 → `pending/low_coverage`. 새 필드 반영을 위해 사용자 cache와 TimeLog 월 파티션 rebuild 필요(개발 Redis는 rebuild 완료, 배포 서버는 배포 후 수행)
 
