@@ -666,6 +666,42 @@ INFX Works Desktop을 사용하는 평일 근무자의 키보드와 마우스 �
 - **외근 후 퇴근** 선택 시: 실제 클릭 시각으로 `퇴근 / 정상`을 생성하고, 외근 사유를 받아 `외근 / 신청`을 생성
 - **취소** 선택 시: 퇴근 처리 없이 닫기
 
+#### 층별 마지막 퇴실자 안내
+
+퇴근 체크 modal을 열 때 사용자가 자기 층의 마지막 퇴실자인지 판정하고, 마지막 퇴실자이면 퇴실 점검 안내를 강조 표시한다.
+
+**층 판정**
+
+- 층은 자리배치도(`SGSeatMapCache` layout)의 badge `floor` 값(`7f`, `8f`)으로 정한다. badge의 `sgUserId` 또는 legacy `employeeId`(`sg-<id>`)로 ShotGrid 사용자와 연결한다.
+- 자리배치도에 좌석이 없는 사용자는 판정 대상이 아니며 안내를 표시하지 않는다.
+- 자리배치도에 좌석이 있어도 해당 근무일의 출퇴근 체크 대상(`fetch_attendance_users`)이 아닌 사용자는 층 인원 계산에서 제외한다. 본인이 출퇴근 대상이 아니면 판정 대상이 아니다.
+- 자리배치도 Redis cache가 없으면 경고 로그 없이 조용히 판정을 생략하고 안내를 표시하지 않는다. ShotGrid read fallback을 수행하지 않는다.
+
+**근무 중 판정**
+
+- 같은 층의 다른 사용자 중 한 명이라도 `근무 중`이면 마지막 퇴실자가 아니다.
+- `근무 중`은 현재 논리 근무일(`get_business_date`)에 유효한 출근 기록이 있고 퇴근 기록이 없으며, Desktop 유휴 presence가 현재 근무 session(`work_date`, `clock_in_log_id` 일치)의 `idle` 상태가 아닌 경우다.
+- 퇴근 미체크로 출근 기록만 남은 사용자라도 Desktop 유휴 presence가 `idle`(`Zzz...`)이면 이미 퇴실한 것으로 보고 근무 중 인원에서 제외한다.
+- Desktop 유휴 presence Redis key가 없으면 §4.1 규칙과 같이 유휴 아님(`근무 중`)으로 본다.
+- presence Redis 자체를 읽지 못하면 로그만 남기고 판정을 생략한다(`applicable=false`). 사용자에게 오류나 경고를 표시하지 않는다.
+- 판정에 사용하는 출퇴근 기록은 일별 aggregate Redis cache(`AttendanceQueryService.get_date_view`)만 사용한다. cache miss는 오류로 응답하고 web은 안내 없이 기존 퇴근 modal을 유지한다.
+- 퇴근 여부만 판단하며 층 판정 결과로 출퇴근 레코드를 생성·변경하지 않는다.
+
+**API**
+
+- `GET /api/attendance/last-leaver-check` (`nav_last_leaver_check`)
+- 응답 `data`: `applicable`, `floor`, `floor_label`(`7층`/`8층`), `is_last_leaver`, `remaining_count`, `work_date`
+- 대리 조회는 다른 navbar API와 같이 `selected_user_account` query를 따른다.
+
+**Web 표시**
+
+- 퇴근 체크 modal(`choice` step)을 열 때 API를 호출하고, 응답 전에는 기존 modal을 그대로 표시한다. 응답 대기 중에도 퇴근 처리를 막지 않는다.
+- `is_last_leaver`가 `true`이면 modal body에 `role="alert"` 강조 블록(`.app-navbar-clock-out-last-leaver`)을 표시한다. 문구는 `<층> 마지막 퇴실자입니다.`, `퇴근 전에 아래 항목을 반드시 확인해 주세요.`와 점검 항목 `냉난방기 끄기`, `실내등 끄기`, `입구 보안 작동`이다.
+- 강조 블록은 `--modal-danger` 좌측 4px accent와 진한 배경을 사용하고, header에는 status mark를 두지 않는다(DESIGN_GUIDE Modal 규칙).
+- 마지막 퇴실자이면 `그냥 퇴근`, `퇴근 처리` 버튼 문구를 `마지막 퇴실자임을 확인하고 퇴근`으로 바꾼다. `외근 후 퇴근`, `취소` 문구와 버튼 순서는 유지한다.
+- 퇴근 취소 modal과 외근 후 퇴근 사유 step에는 표시하지 않는다.
+- modal을 닫은 뒤 도착한 응답은 무시한다.
+
 #### 비근로일 퇴근 처리
 
 비근로일에는 의무 근무시간과 야근 기준을 적용하지 않는다.
