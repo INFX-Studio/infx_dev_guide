@@ -113,6 +113,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 2. **마지막 입력 후 경과 시간 ≥ idle 임계값(기본 10분, D-6)** → `idle`. 단, 포어그라운드가 감시 대상 DCC이고 해당 프로세스 CPU 사용률이 임계값 이상이면 `대기` 컨텍스트(직전 활성 컨텍스트에 귀속). 렌더 대기, 파일 로딩, 플레이백 확인 시간의 idle 오분류 방지
 3. **포어그라운드가 감시 대상 DCC, 파서가 파일 경로 인식** → Project + Main Job (`work`)
 4. **포어그라운드가 감시 대상 DCC, 파서 인식 실패** → `미분류`. 사용자 입력 대상 ([§2.6](#26-dcc-밖-시간과-미분류-시간-처리-d-7d-11-결정))
+   - 예외 (2026-09-21): 문서 경로 훅이 없는 DCC(Photoshop, Unreal, Substance, RealityScan, Gaea 등 `auto_timelog_service.HOOK_CAPABLE_PROCESS_PATTERNS` 밖)에서 경로가 없는 세그먼트는 미분류가 아니라 `non_dcc`처럼 직전 컨텍스트 상속. 훅이 있는 Maya·Nuke·Houdini만 경로 없음 = 훅 미동작으로 보고 미분류 유지
 5. **포어그라운드가 비DCC 앱** (브라우저, 메신저, 탐색기, 오피스 등) → `non_dcc`. 초안 생성 시 직전 활성 DCC 컨텍스트로 상속
 6. 그 외 → `non_dcc`
 
@@ -273,6 +274,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | Katana | `flova/katana` (`KATANA_RESOURCES`) | `UIPlugins/katana_pulldown_menu.py` onStartup 콜백 옆 | Katana scene callbacks | Phase 2 범위 밖, 추후 |
 | Hiero | `flova/hiero/Python/Startup/init.py` | 동일 | Nuke API 동일 | Phase 2 범위 밖, 추후 |
 | 3ds Max, Blender, After Effects, Photoshop, Substance, Mari | Flova 통합 없음 | 창 제목 파싱 fallback | 제목에 파일 경로가 있는 앱만 | 파일럿 미분류 통계로 우선순위 결정 |
+| Unreal, Substance Painter, RealityScan, Gaea | Flova 통합 없음 | 없음 | 없음 | 2026-09-21 감시 대상 추가. 경로 없는 세그먼트는 상속 처리(§2.3 예외) |
 
 - DCC Python 버전: Maya 2022 = 3.7.7 (제약 기준), Maya 2024 = 3.10, Nuke 14/15 = 3.9/3.10, Houdini 20.5 = 3.11, Katana 7 = 3.10. 훅 모듈은 3.7 문법 준수
 
@@ -416,7 +418,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | `Auto Timelog Day` | `Date` | `sg_date` | 대상 일자 (date) |
 | `Auto Timelog Day` | `Segments` | `sg_segments` | 세그먼트 JSON 배열 (text) |
 | `Auto Timelog Day` | `Draft` | `sg_draft` | 초안 JSON (text) |
-| `Auto Timelog Day` | `Confirm Status` | `sg_confirm_status` | `pending`, `auto`, `auto_with_unclassified`, `completed`, `expired`, `manual` (list). `auto_with_unclassified`는 자동분 확정 후 미분류 입력 대기, `completed`는 미분류 입력 완료, `expired`는 기한 경과 잠금 |
+| `Auto Timelog Day` | `Confirm Status` | `sg_confirm_status` | `pending`, `draft`, `auto`, `auto_with_unclassified`, `completed`, `expired`, `manual` (list). `draft`는 collect 모드 초안 생성 완료(2026-09-23 리스트 값 추가). `auto_with_unclassified`는 자동분 확정 후 미분류 입력 대기, `completed`는 미분류 입력 완료, `expired`는 기한 경과 잠금 |
 | `Auto Timelog Day` | `Unclassified Ratio` | `sg_unclassified_ratio` | 미분류 비율, 통계용 (float) |
 | `Auto Timelog Day` | `Agent Coverage` | `sg_agent_coverage` | 에이전트 가동률 (float) |
 | `Auto Timelog Day` | `Confirmed At` | `sg_confirmed_at` | 확정 시각 (date_time) |
@@ -511,7 +513,8 @@ Asset 스텝
 
 | 분류 | 프로세스 예시 | 처리 |
 |------|---------------|------|
-| 감시 대상 DCC | maya.exe, Nuke*.exe, houdini*.exe, 3dsmax.exe, blender.exe, AfterFX.exe, Photoshop.exe, mocha*.exe, SilhouetteFX | 문서 경로 기반 귀속 |
+| 감시 대상 DCC | maya.exe, Nuke*.exe, houdini*.exe, katana*.exe, hiero*.exe, 3dsmax.exe, blender.exe, AfterFX.exe, Photoshop.exe, mocha*.exe, UnrealEditor.exe, Adobe Substance 3D Painter.exe, RealityScan.exe, Gaea.exe (`desktop/src/main/auto-timelog/config.ts` `WATCHED_PROCESS_PATTERNS`) | 문서 경로 기반 귀속. 훅 없는 툴은 상속 |
+| 뷰어·모니터 | rv.exe, pureref.exe, mplay.exe, deadlinemonitor.exe | 파이프라인 도구로 취급, `non_dcc` (상속). 감시 대상에 넣지 않음 (2026-09-21 결정) |
 | 파이프라인 도구 | RV, 사내 PySide2 툴 | `non_dcc` (상속) |
 | 비DCC 업무 앱 | 브라우저, Mattermost, 오피스, 탐색기 | `미분류` (상속 정책 적용) |
 | 제외 앱 | 게임, 미디어 플레이어 등 명시 목록 | 항상 `idle` |
@@ -588,6 +591,8 @@ Asset 스텝
 4. 배포 서버 cron: 완료(코드). `start-project-timelog`가 `deploy/cron/infx-works-auto-timelog-judge`를 `/etc/cron.d/`에 설치 (근무일 12:00). 다음 배포 시 자동 반영
 5. flova 갱신·앱 릴리즈: gmdirect devsync push 완료, 데스크톱 v1.02.088 `W:/inhouse/InfxWorks` 배치 완료. 배포 서버 `start-project-timelog` 실행은 keekee에서 SSH 키 인증이 안 되어(비밀번호 인증만 허용) devtask `20260915-095126-deploy-auto-timelog`(manual)로 gmdirect 콘솔에 절차를 넣어 둠. 실행 후 사용자·TimeLog 2026-09 cache rebuild와 `auto_timelog_judge --days 1` 확인
 6. 폐쇄망 확인: Git Bash가 아닌 PowerShell·cmd에서 파이프 검증
+8. 베타 1차 점검 (2026-09-21, 서버 로그 9/1~9/21 + ShotGrid 87건 분석): 수집은 9/16 18:47부터 정상(일 17~26명, 세그먼트 4,143건, 형식 오류 0). 판정 배치는 cron 실행 사용자(sysadmin)의 `/mnt/W/inhouse_logs` 권한 오류로 9/17·9/18 모두 실패 → cron을 root로 변경. 서버 `timelog` 로거 파일 기록이 9/11부터 소실(flova `get_logger` 핸들러 제거) → flova 수정. 상세는 §9 P-14·P-15
+9. 배포 검증: `start-project-timelog`가 gunicorn 재시작 후 `/api/auto-timelog/status/` 응답 코드를 확인(200/302 아니면 실패 종료). 9/15 배포 시 gunicorn이 구버전으로 남아 전 사용자 앱이 404를 받은 사례 재발 방지
 7. 판정 배치 실측: 개발 Redis(출퇴근·사용자·TimeLog cache 실데이터)로 2026-09-15 실행. 출퇴근 인정 구간 산출·퇴근 판정·저장소 upsert 정상, 세그먼트 없음 → `pending/low_coverage`. 새 필드 반영을 위해 사용자 cache와 TimeLog 월 파티션 rebuild 필요(개발 Redis는 rebuild 완료, 배포 서버는 배포 후 수행)
 
 ### 테스트 원칙
@@ -621,6 +626,8 @@ Asset 스텝
 | 3 | 앱 안내 화면 및 확인 기록 | 완료 | | 2026-09-14 |
 | 4 | 전사 수집 베타 (collect 모드) | 진행 중 | | 2026-09-15 시작. 데스크톱 v1.02.089 배포 후 관리자 화면 초안 일치율·미등록 툴·미인식 경로 관찰 |
 | 4 | 관리자 화면 | 완료 | | 2026-09-14 `/manage/auto-timelog` |
+| 4 | 관리자 화면 미수집 사용자 목록 | 완료 | | 2026-09-21. 기간 종료일 기준 활성·대상 사용자 중 레코드 없는 사용자 (`uncollected`) |
+| 4 | 베타 1차 점검·수정 | 완료 | | 2026-09-21. §6 체크리스트 8·9, §9 P-14·P-15·P-16 |
 | 5 | 자동 확정 전환 | 완료(코드) | | 판정 배치가 자동 확정 수행. cron 등록은 운영 항목 |
 | 5 | 전사 확대 | 미착수 | | 운영 항목. HumanUser `Auto Timelog` 체크로 단계적 확대 |
 
@@ -645,6 +652,10 @@ Asset 스텝
 
 | ID | 내용 | 해결 방법 | 해결일 | 관련 커밋/문서 |
 |----|------|-----------|--------|----------------|
+| P-17 | collect 모드 초안 저장 시 `Confirm Status='draft'`가 ShotGrid 리스트 값에 없어 CRUD ERROR. 9/21~9/23 배치 3회 모두 초안 대상 전원 error (9/23: 7일 합계 error 151건) | ShotGrid `sg_confirm_status` 리스트에 `draft` 추가 (API `schema_field_update`, 2026-09-23). 코드 상수 추가 시 리스트 값 선행 생성 규칙 재확인 | 2026-09-23 | §4.3 |
+| P-14 | 판정 배치 cron이 sysadmin으로 실행되어 flova 로거의 `/mnt/W/inhouse_logs`(root 전용) 열기에서 PermissionError로 시작 즉시 중단. 9/17·9/18 초안 0건 | `deploy/cron/infx-works-auto-timelog-judge` 실행 사용자를 gunicorn과 같은 root로 변경 | 2026-09-21 | PUB_GUIDE §9 |
+| P-15 | flova `get_logger('timelog', no_file=True)`(`scripts/export_xls.py`)가 Django dictConfig의 `timelog` 로거 핸들러를 전부 제거해 9/11 17:13부터 서버 파일 로그에서 `timelog.*` 기록(세그먼트 수신 포함)이 사라짐 | flova `get_logger`가 flova 외부(호스트 앱)가 붙인 핸들러가 있는 로거는 손대지 않고 그대로 반환. flova가 붙인 핸들러만 교체 (`_flova_owned_handler` 표시) | 2026-09-21 | `flova/log/core.py` |
+| P-16 | 9/15 배포에서 gunicorn이 구버전 코드로 남아 `/api/auto-timelog/*` 404. 앱은 60초마다 재시도만 하며 수집 미시작 (9/16 하루 3.2만 건 404 경고) | 서비스 재시작으로 해소. 재발 방지로 배포 스크립트에 API 응답 확인 단계 추가 | 2026-09-16 | `start-project-timelog` |
 | P-8 | 활동 수집 고지·동의 절차 미정 | 단계별 공지 + 앱 최초 실행 안내 화면·확인 시각 기록 (D-4) | 2026-09-10 | 이 문서 §3.2, §6 |
 | P-9 | 자동 프로젝트 타임로그 대상자 적용 여부 | 제외. 월별 일괄 기입 배치로 처리 (D-3) | 2026-09-10 | 이 문서 §1.2 |
 | P-12 | 지연 업로드로 판정 시점에 세그먼트 누락 | 로컬 즉시 저장으로 유실 없음. 앱·윈도우 종료 시 즉시 업로드, 판정 시점을 다음 근무일 12:00로 이동, 이후 지연분 자동 재판정 | 2026-09-10 | 이 문서 §2.5, §2.8 |
@@ -751,3 +762,5 @@ Asset 스텝
 | 2026-09-08 | D-6 결정: idle 임계값 10분 |
 | 2026-09-08 | D-2 결정: 포어그라운드 조회는 Python 사이드카. P-5 해결 |
 | 2026-09-08 | D-1 결정: 서버 저장은 ShotGrid `Auto Timelog Day` 사용자·일자 1레코드. P-6 해결 |
+| 2026-09-21 | 베타 1차 점검: P-14(cron root), P-15(flova 로거 핸들러 보존), P-16(배포 API 검증) 해결. 감시 대상 DCC 4종 추가, 훅 없는 DCC 상속 규칙(§2.3 예외), 테스트·R&D 프로젝트 일치율 제외(`is_test_project`), 관리자 미수집 사용자 목록, 머신 세그먼트 60초 미만 폐기. §3.3·§5.3·§6·§7·§9 갱신 |
+| 2026-09-23 | P-17 해결: `Confirm Status` 리스트에 `draft` 추가. 베타 2차 점검(9/21~23 로그): 수집 일 16~21명·수신 330~570건/일 정상, cron root 전환 정상 |
