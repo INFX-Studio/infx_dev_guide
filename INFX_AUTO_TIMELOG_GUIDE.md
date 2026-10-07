@@ -265,6 +265,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 - 훅 공통 모듈: `flova/timelog/auto_timelog/dcc_hook.py` (Python 3.7 문법). DCC별 startup에서는 이 모듈의 등록 함수 1줄만 호출
 - 전송: 기존 AMI 실행 named pipe와 같은 방식의 전용 pipe `\\.\pipe\infx-works-auto-timelog`. 연결 timeout 0.2초, 실패 시 무시 (DCC 시작·저장을 절대 막지 않음). 참고 구현 `flova/app/ami_exec/dispatch.py`, `flova/temp/infx_protocol_sender.py`
 - 페이로드: `{"pid", "dcc", "doc_path", "event"}`. 컨텍스트 해석은 DCC 안에서 하지 않고 에이전트·서버가 수행
+- 주기 재전송 (2026-10-07): 등록 함수가 `dcc_hook.start_heartbeat(dcc)`로 daemon 스레드를 띄워 콜백이 마지막으로 알려준 문서 경로를 5분마다 `open` 이벤트로 다시 보낸다 (`HEARTBEAT_INTERVAL_SEC`). 데스크톱 앱의 PID→경로 레지스트리가 메모리 전용이라 앱 재시작·자동 업데이트 때 사라지고, 훅 등록 전에 열린 세션은 다음 저장까지 경로가 없던 문제(P-18)를 복구한다. 스레드는 DCC API를 호출하지 않고 콜백이 갱신한 캐시 값만 보낸다
 
 | DCC | 부트스트랩 위치 | 훅 삽입 지점 | 이벤트 | 현황 |
 |-----|-----------------|--------------|--------|------|
@@ -652,6 +653,7 @@ Asset 스텝
 
 | ID | 내용 | 해결 방법 | 해결일 | 관련 커밋/문서 |
 |----|------|-----------|--------|----------------|
+| P-18 | 앱 재시작·자동 업데이트(9/21 v1.02.095) 후 열려 있던 DCC 세션의 경로가 다음 저장·열기까지 비어 Maya·Nuke 세그먼트 일부가 경로 없음. Houdini(FX-1·FX-3)는 일주일간 경로 0건 | 훅 주기 재전송(§3.3 heartbeat). Houdini 0건은 별개 원인으로, T-3 실측에서는 hython+HOUDINI_PATH 경로로 훅이 정상 동작하므로 FX PC의 실행 경로(flova bat 미경유 `houdini.exe`, `houdini.env`의 `HOUDINI_PATH` 덮어쓰기) 확인 필요 | 2026-10-07 | `flova/timelog/auto_timelog/dcc_hook.py` |
 | P-17 | collect 모드 초안 저장 시 `Confirm Status='draft'`가 ShotGrid 리스트 값에 없어 CRUD ERROR. 9/21~9/23 배치 3회 모두 초안 대상 전원 error (9/23: 7일 합계 error 151건) | ShotGrid `sg_confirm_status` 리스트에 `draft` 추가 (API `schema_field_update`, 2026-09-23). 코드 상수 추가 시 리스트 값 선행 생성 규칙 재확인 | 2026-09-23 | §4.3 |
 | P-14 | 판정 배치 cron이 sysadmin으로 실행되어 flova 로거의 `/mnt/W/inhouse_logs`(root 전용) 열기에서 PermissionError로 시작 즉시 중단. 9/17·9/18 초안 0건 | `deploy/cron/infx-works-auto-timelog-judge` 실행 사용자를 gunicorn과 같은 root로 변경 | 2026-09-21 | PUB_GUIDE §9 |
 | P-15 | flova `get_logger('timelog', no_file=True)`(`scripts/export_xls.py`)가 Django dictConfig의 `timelog` 로거 핸들러를 전부 제거해 9/11 17:13부터 서버 파일 로그에서 `timelog.*` 기록(세그먼트 수신 포함)이 사라짐 | flova `get_logger`가 flova 외부(호스트 앱)가 붙인 핸들러가 있는 로거는 손대지 않고 그대로 반환. flova가 붙인 핸들러만 교체 (`_flova_owned_handler` 표시) | 2026-09-21 | `flova/log/core.py` |
@@ -764,3 +766,4 @@ Asset 스텝
 | 2026-09-08 | D-1 결정: 서버 저장은 ShotGrid `Auto Timelog Day` 사용자·일자 1레코드. P-6 해결 |
 | 2026-09-21 | 베타 1차 점검: P-14(cron root), P-15(flova 로거 핸들러 보존), P-16(배포 API 검증) 해결. 감시 대상 DCC 4종 추가, 훅 없는 DCC 상속 규칙(§2.3 예외), 테스트·R&D 프로젝트 일치율 제외(`is_test_project`), 관리자 미수집 사용자 목록, 머신 세그먼트 60초 미만 폐기. §3.3·§5.3·§6·§7·§9 갱신 |
 | 2026-09-23 | P-17 해결: `Confirm Status` 리스트에 `draft` 추가. 베타 2차 점검(9/21~23 로그): 수집 일 16~21명·수신 330~570건/일 정상, cron root 전환 정상 |
+| 2026-10-07 | 베타 2차 점검(9/24~10/6): 초안 237건 중 항목 있는 41건 일치율 평균 0.85, 빈 초안 167건(미수집 11명·비DCC 직군·훅 미동작). P-18 훅 주기 재전송 추가. 운영 로그 폴링 INFO 17곳 DEBUG 전환 |
