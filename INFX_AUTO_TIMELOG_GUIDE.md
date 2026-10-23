@@ -34,6 +34,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | 모드 | 설정 | 대상 | 동작 |
 |------|------|------|------|
 | `collect` (현재, 베타) | `AUTO_TIMELOG_MODE=collect` (기본값) | INFX Works에 로그인한 전 사용자. 자동 프로젝트 타임로그 대상자 포함 | 데스크톱 앱이 실행 중인 동안 수집·업로드. 판정 배치는 초안만 저장(`Confirm Status = draft`), TimeLog 미생성. 타임로그 화면·알림·제출 검증 변화 없음. 관리자 화면에서 초안 vs 수동 입력 일치율 관찰 |
+| `shadow` (2026-10-23 추가) | `AUTO_TIMELOG_MODE=shadow` | collect와 같은 전 사용자 | confirm과 같은 판정·레코드 생성을 수행하되 TimeLog 대신 `Auto Timelog Shadow` 엔티티에 저장. 미분류 시간도 `Source=unclassified` 레코드로 저장. 잠금·알림·수동 입력 변화 없음. `Confirm Status=shadow`. 관리자 화면 "shadow 대조"로 수동 입력과 비교 |
 | `confirm` | `AUTO_TIMELOG_MODE=confirm` | HumanUser `Auto Timelog` 대상자 (자동 프로젝트 타임로그 대상자 제외, D-3) | §2.8 자동 확정·잠금, §2.9 미분류 입력 |
 
 - 베타 원칙: 사용자 업무를 방해하지 않고 웍스 오류를 만들지 않는다. 수집 실패는 모두 무시·로그만 남기고, 앱·DCC·웹 어느 쪽도 예외를 사용자에게 노출하지 않는다
@@ -415,6 +416,7 @@ INFX Works **자동 타임로그** 기능의 단일 기준 문서. 작동 알고
 | HumanUser | `Auto Timelog` | `sg_auto_timelog` | 자동 타임로그 대상 여부 (checkbox). **생성 완료 2026-09-14** |
 | HumanUser | `Auto Timelog Notice At` | `sg_auto_timelog_notice_at` | 앱 안내 화면 확인 시각 (date_time). **생성 완료 2026-09-14** |
 | TimeLog | `Auto Timelog Source` | `sg_auto_timelog_source` | TimeLog 생성 경로 (list: `manual`, `auto`, `manual_unclassified`). `auto`는 수정 잠금. **생성 완료 2026-09-14**. `TimeLogSchema.SG_FIELD_LIST`에 추가됨 |
+| CustomNonProjectEntity22 `Auto Timelog Shadow` | `User` / `Project` / `Date` / `Duration` / `Main Job` / `Work Time` / `Day Type` / `Source` / `Judged At` / `Auto Timelog Day` | `sg_user`, `sg_project`, `sg_date`, `sg_duration`(분), `sg_main_job`, `sg_work_time`, `sg_day_type`, `sg_source`(auto/unclassified), `sg_judged_at`, `sg_auto_timelog_day`(Auto Timelog Day 링크) | shadow 모드 저장 엔티티. TimeLog 레코드와 1:1 + 미분류 레코드. `code`는 `{user_id}:{date}:{n}`. **엔티티 활성화(사용자)·필드 생성 완료 2026-10-23** (`backend/scripts/setup_auto_timelog_shadow_schema.py`). 코드 상수 `auto_timelog_service.SHADOW_ENTITY` |
 | CustomNonProjectEntity21 `Auto Timelog Day` | `User` | `sg_user` | 대상 사용자 (entity). **엔티티·필드 생성 완료 2026-09-15** (엔티티는 Site Preferences에서 수동 활성화, 필드 8개는 API 생성). 코드 상수 `auto_timelog_service.AUTO_DAY_ENTITY`. 레코드 create/get/update/find_range 실측 확인 |
 | `Auto Timelog Day` | `Date` | `sg_date` | 대상 일자 (date) |
 | `Auto Timelog Day` | `Segments` | `sg_segments` | 세그먼트 JSON 배열 (text) |
@@ -770,3 +772,4 @@ Asset 스텝
 | 2026-09-23 | P-17 해결: `Confirm Status` 리스트에 `draft` 추가. 베타 2차 점검(9/21~23 로그): 수집 일 16~21명·수신 330~570건/일 정상, cron root 전환 정상 |
 | 2026-10-07 | 베타 2차 점검(9/24~10/6): 초안 237건 중 항목 있는 41건 일치율 평균 0.85, 빈 초안 167건(미수집 11명·비DCC 직군·훅 미동작). P-18 훅 주기 재전송 추가. 운영 로그 폴링 INFO 17곳 DEBUG 전환 |
 | 2026-10-15 | 베타 3차 점검(10/7~10/15): heartbeat 효과로 Nuke 경로 누락 거의 0, Houdini 10/13부터 인식. 항목 있는 초안 51%. §11 통계 사용자 범위 결정, 관리자 개요 users에 대상 전원 포함. nav 진단 로그·미인증 frontend log 거부를 DEBUG로 |
+| 2026-10-23 | shadow 모드 추가(§1.2.1·§4.3): confirm 경로 그대로 `Auto Timelog Shadow`에 저장, 관리자 shadow 대조표. confirm 전환 전 실제 확정 결과 검증 목적. 베타 3차 점검 결과 A등급 10명은 즉시 전환 가능, B 13명 보류, C 18명 대상 외 |
